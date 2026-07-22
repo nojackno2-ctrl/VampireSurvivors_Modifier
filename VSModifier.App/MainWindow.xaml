@@ -97,12 +97,17 @@
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <Ellipse x:Name="GameStatusLight" Width="10" Height="10" Fill="#64748B" VerticalAlignment="Center" Margin="0,0,8,0" />
-                <TextBlock x:Name="StatusText" Grid.Column="1" Text="準備中…" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                <TextBlock x:Name="BackupStatusText" Grid.Column="2" Foreground="#94A3B8" VerticalAlignment="Center" />
+                <TextBlock x:Name="GameStatusText" Grid.Column="1" Text="檢查遊戲狀態…" VerticalAlignment="Center" Margin="0,0,12,0" />
+                <TextBlock x:Name="StatusText" Grid.Column="2" Text="準備中…" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <TextBlock x:Name="CurrentSavePathStatusText" Grid.Column="3" Foreground="#94A3B8" VerticalAlignment="Center"
+                           MaxWidth="260" TextTrimming="CharacterEllipsis" Margin="12,0" />
+                <TextBlock x:Name="BackupStatusText" Grid.Column="4" Foreground="#94A3B8" VerticalAlignment="Center" Text="最近備份：尚無" />
             </Grid>
         </Border>
 
