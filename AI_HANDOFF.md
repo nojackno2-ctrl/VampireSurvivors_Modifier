@@ -12,7 +12,7 @@
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
 5. 目前唯一需要使用者外部狀態的關鍵工作：進入任一單人關卡後，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
-最近重要 Commit：`e8e1deb`（三檔版本指紋）、`78dace3`（授權與發行前驗證）。目前工作樹可能正在進行版本化解鎖表與單屬性金蛋編輯修正，務必以 Git diff 為準。
+最近重要 Commit：`30e94cf`（版本化解鎖與金蛋單屬性）、`d478b8a`（持續線上防護）、`7e9ff8f`（持久狀態列）、`e8caa34`（Profile 結構驗證）。受控 Trainer 開發驗證工具已完成並通過 Debug／Release 驗證；接手時仍務必以 Git log 與 diff 為準。
 
 ## 已確認環境
 
@@ -96,3 +96,6 @@
 - 新狀態列已完成建置、15/15 測試、live read-only 與實際 WPF 畫面 QA；在預設視窗大小下遊戲狀態、一般訊息、路徑省略與最近備份可同時閱讀，沒有重疊或裁切。QA 未寫入存檔。
 - 版本 Profile 安全稽核發現 schema 尚未驗證 AOB／RIP 範圍、patch 等長性或已驗證 Profile 的功能完整度。已新增結構驗證：所有 address、AOB、patch bytes 與 feature kind/value type 都先驗證；`verified: true` 必須具備線上 guard 與 24 個主要／第二波功能，避免未完整或手誤 Profile 被啟用。
 - Profile schema 強化已完成建置 0 警告／0 錯誤、15/15 測試與 live read-only；目前 Profile 可通過，測試中的不同長度 patch 會在 catalog 載入時被拒絕。
+- 再次重跑主選單 Trainer 唯讀診斷：精確命中目前 Profile，`gameSpeed=1` 與 `maxTreasure` 兩段位元組可讀；`onlineSession` 與其餘 22 項仍在指標鏈第 3 層得到 null，合計 2/24。退出碼 1 代表 guard 尚不可解析、不是建置失敗；沒有進行任何記憶體寫入。
+- 已新增僅供開發的受控驗證路徑：未驗證 Profile 仍不能由正式 WPF 附加；開發命令必須精確指定目前 Profile ID、一次只允許單一功能、限制 100–5000ms，並沿用 100ms 線上 guard。數值與 patch 都會在結束時還原並讀回確認；還原第一次失敗時保留追蹤狀態，供 `DisposeAsync` 再試。
+- 受控驗證工具離線里程碑：全方案建置 0 警告／0 錯誤，16/16 測試通過。新增測試證明正式附加仍拒絕 `verified: false`，且開發驗證會拒絕錯誤 Profile ID、錯誤功能類型與超過 5 秒的要求。尚未執行任何受控寫入；必須等使用者進入單人關卡，唯讀確認 `onlineSession=0` 後才可逐項執行。

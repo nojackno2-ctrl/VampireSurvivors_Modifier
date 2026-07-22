@@ -14,13 +14,18 @@ public sealed class TrainerSession : IAsyncDisposable
     private readonly object _stateGate = new();
     private readonly Dictionary<string, byte[]> _originalValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MemoryPatchSet> _patches = new(StringComparer.Ordinal);
+    private readonly string? _verificationFeatureKey;
     private Exception? _safetyStopCause;
     private bool _disposed;
 
-    private TrainerSession(ProcessMemorySession memory, GameVersionProfile profile)
+    private TrainerSession(
+        ProcessMemorySession memory,
+        GameVersionProfile profile,
+        string? verificationFeatureKey = null)
     {
         _memory = memory;
         Profile = profile;
+        _verificationFeatureKey = verificationFeatureKey;
         _locks.LockFailed += Locks_LockFailed;
         _locks.Set(SafetyGuardKey, EnsureOffline);
     }
@@ -45,20 +50,49 @@ public sealed class TrainerSession : IAsyncDisposable
         ProfileMatchResult match = catalog.Match(fingerprint);
         GameVersionProfile profile = match.Profile
             ?? throw new InvalidOperationException(match.Error ?? "目前 offsets.json 不支援這個遊戲版本。");
-        if (!profile.Verified)
-        {
-            throw new InvalidOperationException("此版本偏移尚未完成實機驗證，已拒絕附加。");
-        }
-
-        if (profile.OnlineSession is null)
-        {
-            throw new InvalidOperationException("此版本缺少線上會話防護偏移，已拒絕附加。");
-        }
+        TrainerProfilePolicy.RequireReleaseReady(profile);
 
         ProcessMemorySession memory = ProcessMemorySession.Attach();
         try
         {
             return new TrainerSession(memory, profile);
+        }
+        catch
+        {
+            memory.Dispose();
+            throw;
+        }
+    }
+
+    internal static TrainerSession AttachForVerification(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        string featureKey,
+        FeatureKind expectedKind,
+        TimeSpan duration)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath);
+        ProfileMatchResult match = catalog.Match(fingerprint);
+        GameVersionProfile profile = match.Profile
+            ?? throw new InvalidOperationException(match.Error ?? "目前 offsets.json 不支援這個遊戲版本。");
+        TrainerProfilePolicy.RequireDevelopmentVerification(
+            profile,
+            expectedProfileId,
+            featureKey,
+            expectedKind,
+            duration);
+
+        ProcessMemorySession memory = ProcessMemorySession.Attach();
+        try
+        {
+            return new TrainerSession(memory, profile, featureKey);
         }
         catch
         {
@@ -159,13 +193,14 @@ public sealed class TrainerSession : IAsyncDisposable
         {
             ThrowIfUnavailable();
             _locks.Remove(featureKey);
-            if (!restoreOriginal || !_originalValues.Remove(featureKey, out byte[]? original))
+            if (!restoreOriginal || !_originalValues.TryGetValue(featureKey, out byte[]? original))
             {
                 return;
             }
 
             FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            _memory.WriteBytes(Resolve(feature.Address), original);
+            _ = WriteValueAndVerify(feature.Address, original);
+            _originalValues.Remove(featureKey);
         }
     }
 
@@ -198,10 +233,57 @@ public sealed class TrainerSession : IAsyncDisposable
         lock (_stateGate)
         {
             ThrowIfUnavailable();
-            if (_patches.Remove(featureKey, out MemoryPatchSet? patch))
+            if (_patches.TryGetValue(featureKey, out MemoryPatchSet? patch))
             {
                 patch.Dispose();
+                _patches.Remove(featureKey);
             }
+        }
+    }
+
+    internal double ReadValueForVerification(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            int size = GetValueSize(feature.ValueType);
+            return DecodeValue(feature.ValueType, _memory.ReadBytes(Resolve(feature.Address), size));
+        }
+    }
+
+    internal double RestoreValueForVerification(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            _locks.Remove(featureKey);
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+            {
+                throw new InvalidOperationException($"功能 {featureKey} 沒有可還原的原始值。");
+            }
+
+            byte[] restored = WriteValueAndVerify(feature.Address, original);
+            _originalValues.Remove(featureKey);
+            return DecodeValue(feature.ValueType, restored);
+        }
+    }
+
+    internal bool PatchMatchesForVerification(string featureKey, bool expectedPatched)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Patch);
+            if (!PatchSegmentMatches(feature.Address, expectedPatched ? feature.PatchBytes : feature.ExpectedBytes))
+            {
+                return false;
+            }
+
+            return feature.AdditionalPatches.All(segment => PatchSegmentMatches(
+                segment.Address,
+                expectedPatched ? segment.PatchBytes : segment.ExpectedBytes));
         }
     }
 
@@ -302,7 +384,7 @@ public sealed class TrainerSession : IAsyncDisposable
 
             try
             {
-                _memory.WriteBytes(Resolve(feature.Address), original);
+                _ = WriteValueAndVerify(feature.Address, original);
                 _originalValues.Remove(key);
             }
             catch (Exception exception)
@@ -321,6 +403,13 @@ public sealed class TrainerSession : IAsyncDisposable
 
     private FeatureDefinition GetFeature(string featureKey, FeatureKind kind)
     {
+        if (_verificationFeatureKey is not null
+            && !string.Equals(_verificationFeatureKey, featureKey, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"此開發驗證工作階段僅允許功能 {_verificationFeatureKey}，已拒絕 {featureKey}。");
+        }
+
         if (!Profile.Features.TryGetValue(featureKey, out FeatureDefinition? feature))
         {
             throw new KeyNotFoundException($"此版本沒有功能 {featureKey} 的偏移。");
@@ -396,6 +485,25 @@ public sealed class TrainerSession : IAsyncDisposable
             ? null
             : ParseBytes(expectedBytes, "expectedBytes");
         return new MemoryPatch(_memory, Resolve(address), patch, expected);
+    }
+
+    private bool PatchSegmentMatches(AddressDefinition address, string? expectedBytes)
+    {
+        byte[] expected = ParseBytes(expectedBytes, "驗證位元組");
+        return _memory.ReadBytes(Resolve(address), expected.Length).AsSpan().SequenceEqual(expected);
+    }
+
+    private byte[] WriteValueAndVerify(AddressDefinition address, byte[] value)
+    {
+        nint resolved = Resolve(address);
+        _memory.WriteBytes(resolved, value);
+        byte[] verification = _memory.ReadBytes(resolved, value.Length);
+        if (!verification.AsSpan().SequenceEqual(value))
+        {
+            throw new IOException($"位址 0x{resolved:X} 的原始數值還原後讀回驗證失敗。");
+        }
+
+        return verification;
     }
 
     private void ThrowIfUnavailable()
