@@ -12,7 +12,7 @@
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
 5. 目前唯一需要使用者外部狀態的關鍵工作：進入任一單人關卡後，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
-最近重要 Commit：`74fbdab`（受控 Trainer 實機驗證流程）、`36f1234`（Visual Studio 發布包安全設定）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`。接手時仍務必以 Git log、status 與 diff 為準。
+最近重要 Commit：`74fbdab`（受控 Trainer 實機驗證流程）、`36f1234`（Visual Studio 發布包安全設定）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。接手時仍務必以 Git log、status 與 diff 為準。
 
 ## 已確認環境
 
