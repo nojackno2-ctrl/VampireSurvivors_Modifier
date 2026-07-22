@@ -53,10 +53,15 @@
 
 - 不得把本機絕對使用者路徑、Steam ID、SaveData 內容或遊戲衍生輸出寫入 repo。
 - 所有會改動資料的測試只能使用工作區內產生的測試檔。
-- Trainer 尚無版本化偏移；在取得並驗證正確偏移前不得假稱記憶體功能可用。
+- Trainer 已有目前版本的候選 profile，但仍是 `verified: false`；在完成單人關卡唯讀與逐項可逆寫入驗證前不得假稱記憶體功能可用。
 
 ## 下一步
 
-1. 將 Trainer 版本狀態、附加流程與功能控制接入 WPF。
-2. 取得 Il2CppDumper 產出，填入線上 guard 與功能偏移並逐項實機驗證。
-3. 補做 WPF 執行中視覺 QA。
+1. 在實際單人關卡內重跑唯讀診斷，確認線上 guard 與角色／屬性鏈。
+2. 逐項執行可逆短時間寫入驗證，確認線上 guard、還原與實際遊戲效果後才將 profile 設為已驗證。
+3. 完成寶箱最高獎勵 patch 與 WPF 執行中視覺 QA。
+
+## 最新診斷紀錄（2026-07-22）
+
+- 新增 `--inspect-time-scale-read-only` 的第一次編譯失敗：`nint + long` 產生 `long`，無法傳入位址參數；改為明確 `nint` 轉換後，全方案建置為 0 警告、0 錯誤。
+- `Time.get_timeScale` 唯讀定位到 `UnityPlayer.dll + 0xB7D40`；AOB＋RIP-relative 解析器與唯一匹配檢查已加入，11/11 測試通過。實際主選單唯讀解析 `gameSpeed = 1`，未寫入遊戲。

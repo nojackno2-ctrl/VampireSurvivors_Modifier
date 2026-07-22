@@ -13,6 +13,7 @@
       "features": {
         "invulnerability": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 844] } },
         "quickTreasure": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 144, 80, 345] } },
+        "gameSpeed": { "kind": "value", "valueType": "float", "preserveZero": true, "address": { "module": "UnityPlayer.dll", "aob": "48 8B 05 ?? ?? ?? ?? F3 0F 10 80 AC 01 00 00 C3", "ripRelativeOffset": 3, "pointerOffsets": [0, 428] } },
         "damageMultiplier": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 16, 16] } },
         "stat.growth": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 48, 16] } },
         "stat.greed": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 96, 16] } },
