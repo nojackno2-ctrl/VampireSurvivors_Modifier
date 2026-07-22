@@ -9,6 +9,7 @@ public sealed record GameInstallation(
     string RootPath,
     string ExecutablePath,
     string GameAssemblyPath,
+    string UnityPlayerPath,
     string MetadataPath);
 
 public sealed partial class GameInstallationLocator
@@ -65,10 +66,11 @@ public sealed partial class GameInstallationLocator
             string root = Path.Combine(libraryRoot, "steamapps", "common", "Vampire Survivors");
             string executable = Path.Combine(root, "VampireSurvivors.exe");
             string gameAssembly = Path.Combine(root, "GameAssembly.dll");
+            string unityPlayer = Path.Combine(root, "UnityPlayer.dll");
             string metadata = Path.Combine(root, "VampireSurvivors_Data", "il2cpp_data", "Metadata", "global-metadata.dat");
-            if (File.Exists(executable) && File.Exists(gameAssembly) && File.Exists(metadata))
+            if (File.Exists(executable) && File.Exists(gameAssembly) && File.Exists(unityPlayer) && File.Exists(metadata))
             {
-                installations.Add(new GameInstallation(root, executable, gameAssembly, metadata));
+                installations.Add(new GameInstallation(root, executable, gameAssembly, unityPlayer, metadata));
             }
         }
 

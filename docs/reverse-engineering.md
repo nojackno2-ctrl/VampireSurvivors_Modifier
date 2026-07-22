@@ -2,11 +2,14 @@
 
 本文件只記錄自行整理的偏移與驗證狀態，不包含或重製 `dump.cs`、`script.json`、`il2cpp.h` 或遊戲檔案。
 
-## 2026-07-19 local build
+## 目前 Steam 版（2026-07-22 擷取）
 
 - `GameAssembly.dll` SHA-256：`f43017baa184cc6a5d6f6cc41d5bce28eaba5e164083dfa2ecb136fbbdb00dab`
+- `UnityPlayer.dll` SHA-256：`4abd2ee6d6ca6176b3122a22cc0264ea0e3c1674bd2969621fe72decbf7b5134`
+- `global-metadata.dat` SHA-256：`ad18e1db49fded4c18d6bf7c1a5e607ff80712c743770c833dcbd540bb939498`
 - IL2CPP metadata version：31
 - Profile 狀態：`verified: false`，只完成靜態推導，尚未實機讀寫驗證。
+- 版本辨識必須同時命中以上三個 SHA-256；任一檔案不同都視為另一個或混合版本，拒絕套用本 Profile。`offsets.json` schema 2 可並列多個三檔版本 Profile。
 - `GM_TypeInfo` RVA：`160283072`
 - `Il2CppClass.static_fields`：`0xB8`
 - `GM.Core`：靜態欄位 `+0x0`，指向 `GameManager`

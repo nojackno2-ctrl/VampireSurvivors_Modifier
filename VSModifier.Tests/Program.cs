@@ -87,14 +87,18 @@ internal static class Program
             return 1;
         }
 
-        string fingerprint = GameAssemblyFingerprint.CalculateSha256(installations[0].GameAssemblyPath);
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            installations[0].GameAssemblyPath,
+            installations[0].UnityPlayerPath,
+            installations[0].MetadataPath);
         OffsetCatalog catalog = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
-        GameVersionProfile? profile = catalog.FindByHash(fingerprint);
+        ProfileMatchResult match = catalog.Match(fingerprint);
+        GameVersionProfile? profile = match.Profile;
         Console.WriteLine($"PASS  located {candidates.Count} SaveData candidate(s).");
         Console.WriteLine($"PASS  live checksum valid: {document.OriginalChecksumIsValid}.");
         Console.WriteLine($"PASS  parsed {document.Root.Count} top-level fields without writing.");
         Console.WriteLine($"PASS  located {installations.Count} complete game installation(s).");
-        Console.WriteLine($"PASS  current GameAssembly profile registered: {profile is not null}.");
+        Console.WriteLine($"PASS  current DLL/metadata profile combination registered: {profile is not null}.");
         Console.WriteLine($"PASS  current profile remains fail-closed: {profile is { Verified: false }}.");
         return document.OriginalChecksumIsValid && profile is { Verified: false } ? 0 : 1;
     }
@@ -104,7 +108,11 @@ internal static class Program
         GameInstallation installation = new GameInstallationLocator().FindInstallations().FirstOrDefault()
             ?? throw new InvalidOperationException("找不到完整遊戲安裝。");
         OffsetCatalog catalog = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
-        TrainerDiagnosticResult result = TrainerDiagnostics.InspectReadOnly(catalog, installation.GameAssemblyPath);
+        TrainerDiagnosticResult result = TrainerDiagnostics.InspectReadOnly(
+            catalog,
+            installation.GameAssemblyPath,
+            installation.UnityPlayerPath,
+            installation.MetadataPath);
         Console.WriteLine($"Profile: {result.ProfileLabel}; verified={result.ProfileVerified}");
         PrintDiagnostic(result.OnlineSession);
         foreach (DiagnosticValue feature in result.Features)
@@ -370,10 +378,12 @@ internal static class Program
             string hash = new('a', 64);
             File.WriteAllText(path, $$"""
                 {
-                  "schemaVersion": 1,
+                  "schemaVersion": 2,
                   "profiles": [
                     {
                       "gameAssemblySha256": "{{hash}}",
+                      "unityPlayerSha256": "{{new string('b', 64)}}",
+                      "il2CppMetadataSha256": "{{new string('c', 64)}}",
                       "label": "test",
                       "verified": false,
                       "features": {}
@@ -383,7 +393,32 @@ internal static class Program
                 """, Utf8WithoutBom);
             OffsetCatalog catalog = OffsetCatalog.Load(path);
             Equal(1, catalog.Profiles.Count, "Profile count differs.");
-            True(catalog.FindByHash(hash.ToUpperInvariant()) is not null, "Hash lookup must be case-insensitive.");
+            ProfileMatchResult exact = catalog.Match(new GameVersionFingerprint(
+                hash.ToUpperInvariant(),
+                new string('B', 64),
+                new string('C', 64)));
+            True(exact.Profile is not null, "Three-part fingerprint lookup must be case-insensitive.");
+
+            ProfileMatchResult assemblyMismatch = catalog.Match(new GameVersionFingerprint(
+                new string('d', 64),
+                new string('b', 64),
+                new string('c', 64)));
+            True(assemblyMismatch.Profile is null && assemblyMismatch.Error!.Contains("GameAssembly", StringComparison.Ordinal),
+                "GameAssembly mismatch must fail with a specific reason.");
+
+            ProfileMatchResult unityMismatch = catalog.Match(new GameVersionFingerprint(
+                hash,
+                new string('d', 64),
+                new string('c', 64)));
+            True(unityMismatch.Profile is null && unityMismatch.Error!.Contains("UnityPlayer", StringComparison.Ordinal),
+                "UnityPlayer mismatch must fail with a specific reason.");
+
+            ProfileMatchResult metadataMismatch = catalog.Match(new GameVersionFingerprint(
+                hash,
+                new string('b', 64),
+                new string('d', 64)));
+            True(metadataMismatch.Profile is null && metadataMismatch.Error!.Contains("global-metadata", StringComparison.Ordinal),
+                "Metadata mismatch must fail with a specific reason.");
         }
         finally
         {

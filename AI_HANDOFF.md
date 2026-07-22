@@ -30,8 +30,10 @@
 - 已實作 checksum、JSON 存檔模型、備份與安全寫入、遊戲行程阻擋、Steam 存檔探索及常用編輯操作。
 - `dotnet build VSModifier.slnx` 成功；第一次測試執行為 5/5 通過（2026-07-22）。
 - 使用者會以 Visual Studio 編譯，並已授權在重要、已驗證的里程碑建立 commit。
+- 版本維護範圍以目前 Steam 最新版與之後的新版本為主；因沒有歷史遊戲檔案，不為舊版本建立無法驗證的推測 Profile。遊戲更新時保留多 Profile 架構並新增或更新最新版本資料。
 - Trainer 安全底層已完成：外部行程附加、模組定位、型別化讀寫、指標鏈、AOB 掃描、可還原 code patch、100ms 鎖值、倍率鎖值及 offsets profile。
-- `GameAssembly.dll` SHA-256 `f43017baa184cc6a5d6f6cc41d5bce28eaba5e164083dfa2ecb136fbbdb00dab` 已登錄為 `verified: false`，缺偏移與線上 guard 時拒絕附加。
+- Trainer 版本辨識已升級為三檔精確指紋：`GameAssembly.dll`、`UnityPlayer.dll`、`global-metadata.dat` 的 SHA-256 必須同時命中同一個 schema 2 Profile。未知、混搭或 metadata 不符時會回報具體原因並拒絕附加；`offsets.json` 可並列多版本 Profile。
+- 目前三檔指紋已登錄為 `verified: false`，缺偏移、線上 guard 或尚未完成實機驗證時拒絕附加。
 - 最新建置為 0 警告、0 錯誤；完整測試 10/10 通過。live read-only 同時驗證遊戲路徑探索、profile 命中與 fail-closed 狀態。
 - Il2CppDumper v6.7.46 已成功產生本機忽略的 dump；最後 `Console.ReadKey` 因重導輸入拋例外，但 `dump.cs`/`script.json`/`il2cpp.h` 均完整存在於 `dump/current`，沒有寫到遊戲資料夾。
 - 已新增 `VSModifier.IdExtractor`，產生 11 組版本解鎖陣列。PowerUp 兩欄不覆蓋，因重複 ID 代表等級。
@@ -70,3 +72,4 @@
 - 全域熱鍵以 `RegisterHotKey` 實作，預設停用。實測註冊成功、`Ctrl+Shift+F1` 能進入事件並在未附加時安全拒絕，解除註冊後同一按鍵不再觸發；`Ctrl+Shift+F12` 保留為緊急中斷並還原。
 - 雙模式 JSON 樹狀編輯器第一次建置時，Core 與 WPF 成功，但測試專案缺少 `System.Text.Json` using，導致 `JsonValueKind` 無法解析；補上引用後全方案成功、13/13 測試通過。
 - JSON 樹狀／原始雙模式第一次畫面 QA 無裁切，但 TreeView 節點被系統前景色覆蓋成黑色；在資料模板明確指定亮色後重新截圖，根節點與展開的 154 個頂層欄位皆清楚可讀。選取字串節點時，路徑、型別、值與套用按鈕均正確顯示。
+- 使用者要求修改器能辨識遊戲版本並對不同版本採用各自修改方法。版本 Profile 已改為 `GameAssembly.dll`／`UnityPlayer.dll`／`global-metadata.dat` 三檔 SHA-256 精確配對；每個 Profile 自帶獨立偏移、AOB、expected bytes 與驗證狀態，不能因其中一檔相同而誤用。

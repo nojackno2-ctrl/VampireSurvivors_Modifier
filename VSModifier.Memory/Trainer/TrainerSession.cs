@@ -24,12 +24,20 @@ public sealed class TrainerSession : IAsyncDisposable
 
     public bool IsAttached => !_disposed && !_memory.HasExited;
 
-    public static TrainerSession Attach(OffsetCatalog catalog, string gameAssemblyPath)
+    public static TrainerSession Attach(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        string fingerprint = GameAssemblyFingerprint.CalculateSha256(gameAssemblyPath);
-        GameVersionProfile profile = catalog.FindByHash(fingerprint)
-            ?? throw new InvalidOperationException("目前 offsets.json 不支援這個 GameAssembly.dll 版本。");
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath);
+        ProfileMatchResult match = catalog.Match(fingerprint);
+        GameVersionProfile profile = match.Profile
+            ?? throw new InvalidOperationException(match.Error ?? "目前 offsets.json 不支援這個遊戲版本。");
         if (!profile.Verified)
         {
             throw new InvalidOperationException("此版本偏移尚未完成實機驗證，已拒絕附加。");
