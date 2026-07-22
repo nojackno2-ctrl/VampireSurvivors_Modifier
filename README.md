@@ -27,7 +27,7 @@ dotnet run --project VSModifier.Tests
 - 遊戲執行中拒絕寫入存檔。
 - 寫回採 UTF-8 無 BOM，並重算已驗證的 SHA-256 checksum。
 - Trainer 僅使用外部行程記憶體讀寫，不注入 DLL。
-- 線上模式必須自動停用記憶體功能。
+- 附加後以 100ms 間隔持續監控線上狀態；偵測線上會話或任一背景寫入失敗時，自動停止全部鎖值、還原所有值與 code patch，並中斷 Trainer。
 - 全域熱鍵預設停用，必須在 Trainer 頁手動啟用；`Ctrl+Shift+F12` 會緊急中斷 Trainer 並嘗試還原所有原始值。
 - 僅限單機與本地遊玩使用；成就與遊戲內 `CheatCodeUsed` 狀態的影響由使用者自行承擔。
 

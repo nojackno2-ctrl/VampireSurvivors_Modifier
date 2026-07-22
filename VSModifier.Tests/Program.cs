@@ -467,6 +467,18 @@ internal static class Program
 
         True(memory.ReadBytes((nint)0x1020, 2).SequenceEqual(new byte[] { 0x75, 0x06 }),
             "Composite patch did not restore all segments.");
+
+        using MemoryPatch retryFirst = new(memory, (nint)0x1010, new byte[] { 0x90, 0x90 }, new byte[] { 0x74, 0x05 });
+        using MemoryPatch retrySecond = new(memory, (nint)0x1020, new byte[] { 0x90, 0x90 }, new byte[] { 0x75, 0x06 });
+        using MemoryPatchSet retrySet = new([retryFirst, retrySecond]);
+        retrySet.Enable();
+        memory.FailNextCodeWriteAt = (nint)0x1020;
+        Throws<InvalidOperationException>(retrySet.Disable);
+        True(memory.ReadBytes((nint)0x1020, 2).SequenceEqual(new byte[] { 0x90, 0x90 }),
+            "A failed patch restoration must leave the failed segment enabled for retry.");
+        retrySet.Disable();
+        True(memory.ReadBytes((nint)0x1020, 2).SequenceEqual(new byte[] { 0x75, 0x06 }),
+            "A second patch restoration attempt must restore the failed segment.");
         return Task.CompletedTask;
     }
 
@@ -534,11 +546,36 @@ internal static class Program
     private static async Task TestValueLockService()
     {
         int counter = 0;
-        await using ValueLockService service = new(TimeSpan.FromMilliseconds(15));
-        service.Set("counter", () => Interlocked.Increment(ref counter));
-        await Task.Delay(80);
-        service.Remove("counter");
-        True(Volatile.Read(ref counter) >= 2, "Value lock did not enforce repeatedly.");
+        await using (ValueLockService service = new(TimeSpan.FromMilliseconds(15)))
+        {
+            service.Set("counter", () => Interlocked.Increment(ref counter));
+            await Task.Delay(80);
+            service.Remove("counter");
+            True(Volatile.Read(ref counter) >= 2, "Value lock did not enforce repeatedly.");
+        }
+
+        int guardedCounter = 0;
+        int guardChecks = 0;
+        TaskCompletionSource<ValueLockFailureEventArgs> failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using (ValueLockService failClosed = new(TimeSpan.FromMilliseconds(15), stopAllOnFailure: true))
+        {
+            failClosed.LockFailed += (_, args) => failure.TrySetResult(args);
+            failClosed.Set("counter", () => Interlocked.Increment(ref guardedCounter));
+            failClosed.Set("onlineGuard", () =>
+            {
+                if (Interlocked.Increment(ref guardChecks) >= 2)
+                {
+                    throw new OnlineSessionException("online");
+                }
+            });
+            ValueLockFailureEventArgs result = await failure.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Equal("onlineGuard", result.Key, "The failing safety guard key was not reported.");
+            True(failClosed.ActiveLocks.Count == 0, "Fail-closed mode must remove every active lock.");
+            await Task.Delay(40);
+            int stoppedValue = Volatile.Read(ref guardedCounter);
+            await Task.Delay(50);
+            Equal(stoppedValue, Volatile.Read(ref guardedCounter), "No lock may continue after a fail-closed safety event.");
+        }
     }
 
     private static string CreateValidSave()
@@ -604,6 +641,8 @@ internal static class Program
 
         public int CodeWriteCount { get; private set; }
 
+        public nint? FailNextCodeWriteAt { get; set; }
+
         public byte[] ReadBytes(nint address, int length)
         {
             int offset = checked((int)((long)address - BaseAddress));
@@ -619,6 +658,12 @@ internal static class Program
         public void WriteCodeBytes(nint address, ReadOnlySpan<byte> bytes)
         {
             CodeWriteCount++;
+            if (FailNextCodeWriteAt == address)
+            {
+                FailNextCodeWriteAt = null;
+                throw new IOException("Simulated protected write failure.");
+            }
+
             WriteBytes(address, bytes);
         }
     }

@@ -90,3 +90,5 @@
 - 使用者要求每個金蛋屬性都能單獨修改，例如只改攻擊或防禦。金蛋頁改用中文屬性名稱與內部 key 綁定，顯示選定角色／屬性的目前值；已知屬性全部可選，並會從實際 `EggData` 動態加入未來版本新增的數值屬性。套用只改該欄並重算衍生 `total`，其他屬性保持不變，角色 ID 比對不分大小寫。
 - 使用者明確要求保留 AI 交接文件，讓其他代理可繼續或修復。`AGENTS.md` 為協作規則，`AI_HANDOFF.md` 為即時狀態；README 已加入接手入口，本文件頂部新增接手命令與實機阻塞點。
 - 版本化解鎖與金蛋單屬性里程碑驗證：全方案建置 0 警告／0 錯誤，15/15 測試通過；實際安裝的三檔 Profile 與對應 unlock Profile 同時命中，IdExtractor 已驗證可保留多 Profile 且更新同 ID 不重複。實際 WPF QA 顯示 21 個已知金蛋屬性皆完整可選、中文標籤與目前值區無裁切；解鎖頁 dictionary 說明亦完整。QA 未套用或寫入存檔。
+- 線上防護稽核發現原本只在值鎖寫入前檢查，code patch 單獨啟用時缺少持續 guard，背景失敗也只移除單一 lock。已改為附加後永遠啟用 100ms guard；偵測線上或任一背景失敗時 fail-closed 清除全部 locks、還原所有值與 patches、透過 `SafetyStopped` 通知 WPF 自動中斷。複合 patch 還原失敗時保留 enabled 狀態，允許 Dispose 再次嘗試。
+- 持續線上 guard 變更已完成建置 0 警告／0 錯誤與 15/15 測試；回歸證明 fail-closed 事件後所有 locks 停止，複合 patch 還原失敗後可第二次重試成功。尚未在單人關卡實測實際 guard 位址，Profile 仍必須保持 `verified: false`。
