@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="VSModifier.App/VSModifier.App.csproj" />
+  <Project Path="VSModifier.Core/VSModifier.Core.csproj" />
+  <Project Path="VSModifier.Memory/VSModifier.Memory.csproj" />
+  <Project Path="VSModifier.Tests/VSModifier.Tests.csproj" />
+</Solution>
