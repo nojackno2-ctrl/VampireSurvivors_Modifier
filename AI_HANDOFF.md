@@ -73,3 +73,6 @@
 - 雙模式 JSON 樹狀編輯器第一次建置時，Core 與 WPF 成功，但測試專案缺少 `System.Text.Json` using，導致 `JsonValueKind` 無法解析；補上引用後全方案成功、13/13 測試通過。
 - JSON 樹狀／原始雙模式第一次畫面 QA 無裁切，但 TreeView 節點被系統前景色覆蓋成黑色；在資料模板明確指定亮色後重新截圖，根節點與展開的 154 個頂層欄位皆清楚可讀。選取字串節點時，路徑、型別、值與套用按鈕均正確顯示。
 - 使用者要求修改器能辨識遊戲版本並對不同版本採用各自修改方法。版本 Profile 已改為 `GameAssembly.dll`／`UnityPlayer.dll`／`global-metadata.dat` 三檔 SHA-256 精確配對；每個 Profile 自帶獨立偏移、AOB、expected bytes 與驗證狀態，不能因其中一檔相同而誤用。
+- 三檔版本里程碑 commit `e8e1deb` 完成後重跑 Trainer 唯讀診斷：Profile 精確命中；`gameSpeed=1` 與 `maxTreasure` 兩段原始位元組可讀，其餘 22 項均在指標鏈第 3 層得到 null，與遊戲仍在主選單、`GM.Core` 尚未建立一致。未做任何記憶體寫入；須由使用者手動進入任一單人關卡後再驗證。
+- WPF 剩餘頁面已完成實際畫面 QA：資源、解鎖、蛋資料與旗標頁的文字、輸入欄、清單及按鈕均可讀，沒有重疊或裁切；QA 過程沒有按下任何套用或一鍵修改按鈕。至此所有主要頁籤皆有實際畫面證據。
+- 已補上設計計畫要求的 MIT `LICENSE`，README 連結授權條款。framework-dependent win-x64 Release publish 已驗證：包含 App／Core／Memory、`data/offsets.json`、`data/ids/unlocks.json`，不含 GameAssembly、metadata、dump、SaveData 等禁止檔；輸出只放在已忽略的 `artifacts/`，Trainer 未完成實機驗證前不發布。
