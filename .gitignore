@@ -4,6 +4,7 @@ bin/
 obj/
 *.user
 *.suo
+*.pubxml.user
 TestResults/
 artifacts/
 
