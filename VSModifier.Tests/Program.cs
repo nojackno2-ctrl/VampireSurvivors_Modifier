@@ -1,7 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
+using VSModifier.Core.Game;
 using VSModifier.Core.Saves;
+using VSModifier.Memory.Locking;
+using VSModifier.Memory.Patching;
+using VSModifier.Memory.ProcessMemory;
+using VSModifier.Memory.Profiles;
+using VSModifier.Memory.Scanning;
 
 namespace VSModifier.Tests;
 
@@ -22,7 +28,12 @@ internal static class Program
             ("invalid checksum rejection", TestInvalidChecksumRejection),
             ("save editor operations", TestSaveEditor),
             ("backup and safe write", TestBackupAndSafeWrite),
-            ("running game blocks writes", TestRunningGameBlocksWrite)
+            ("running game blocks writes", TestRunningGameBlocksWrite),
+            ("AOB wildcard matching", TestAobPattern),
+            ("pointer chain resolution", TestPointerChain),
+            ("reversible memory patch", TestMemoryPatch),
+            ("offset catalog parsing", TestOffsetCatalog),
+            ("value lock enforcement", TestValueLockService)
         ];
 
         int failures = 0;
@@ -54,10 +65,23 @@ internal static class Program
         }
 
         SaveDocument document = await new SaveFileService().LoadAsync(candidates[0].Path);
+        IReadOnlyList<GameInstallation> installations = new GameInstallationLocator().FindInstallations();
+        if (installations.Count == 0)
+        {
+            Console.Error.WriteLine("FAIL  no complete game installation was found.");
+            return 1;
+        }
+
+        string fingerprint = GameAssemblyFingerprint.CalculateSha256(installations[0].GameAssemblyPath);
+        OffsetCatalog catalog = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
+        GameVersionProfile? profile = catalog.FindByHash(fingerprint);
         Console.WriteLine($"PASS  located {candidates.Count} SaveData candidate(s).");
         Console.WriteLine($"PASS  live checksum valid: {document.OriginalChecksumIsValid}.");
         Console.WriteLine($"PASS  parsed {document.Root.Count} top-level fields without writing.");
-        return document.OriginalChecksumIsValid ? 0 : 1;
+        Console.WriteLine($"PASS  located {installations.Count} complete game installation(s).");
+        Console.WriteLine($"PASS  current GameAssembly profile registered: {profile is not null}.");
+        Console.WriteLine($"PASS  current profile remains fail-closed: {profile is { Verified: false }}.");
+        return document.OriginalChecksumIsValid && profile is { Verified: false } ? 0 : 1;
     }
 
     private static Task TestChecksum()
@@ -153,6 +177,87 @@ internal static class Program
         }
     }
 
+    private static Task TestAobPattern()
+    {
+        AobPattern pattern = AobPattern.Parse("48 8B ?? 90");
+        IReadOnlyList<int> matches = pattern.FindAll([0x48, 0x8B, 0x01, 0x90, 0x00, 0x48, 0x8B, 0xFF, 0x90]);
+        Equal(2, matches.Count, "AOB match count differs.");
+        Equal(0, matches[0], "First AOB offset differs.");
+        Equal(5, matches[1], "Second AOB offset differs.");
+
+        FakeMemory memory = new();
+        memory.WriteBytes((nint)0x1005, new byte[] { 0x48, 0x8B, 0x7F, 0x90 });
+        IReadOnlyList<nint> scanned = AobScanner.Scan(memory, (nint)0x1000, 0x20, pattern, chunkSize: 6);
+        Equal(1, scanned.Count, "Chunked AOB scanner match count differs.");
+        Equal((nint)0x1005, scanned[0], "Chunked AOB scanner missed a boundary match.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestPointerChain()
+    {
+        FakeMemory memory = new();
+        memory.Write((nint)0x1020, (nint)0x1100);
+        nint resolved = PointerChain.Resolve(memory, (nint)0x1000, [0x20, 0x08]);
+        Equal((nint)0x1108, resolved, "Pointer chain produced the wrong address.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestMemoryPatch()
+    {
+        FakeMemory memory = new();
+        memory.WriteBytes((nint)0x1010, [0x74, 0x05]);
+        using MemoryPatch patch = new(memory, (nint)0x1010, new byte[] { 0x90, 0x90 }, new byte[] { 0x74, 0x05 });
+        patch.Enable();
+        True(memory.ReadBytes((nint)0x1010, 2).SequenceEqual(new byte[] { 0x90, 0x90 }), "Patch bytes were not written.");
+        patch.Disable();
+        True(memory.ReadBytes((nint)0x1010, 2).SequenceEqual(new byte[] { 0x74, 0x05 }), "Original bytes were not restored.");
+        True(memory.CodeWriteCount >= 2, "Code writes did not use the protected path.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestOffsetCatalog()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"VSModifierTests_{Guid.NewGuid():N}");
+        string path = Path.Combine(directory, "offsets.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            string hash = new('a', 64);
+            File.WriteAllText(path, $$"""
+                {
+                  "schemaVersion": 1,
+                  "profiles": [
+                    {
+                      "gameAssemblySha256": "{{hash}}",
+                      "label": "test",
+                      "verified": false,
+                      "features": {}
+                    }
+                  ]
+                }
+                """, Utf8WithoutBom);
+            OffsetCatalog catalog = OffsetCatalog.Load(path);
+            Equal(1, catalog.Profiles.Count, "Profile count differs.");
+            True(catalog.FindByHash(hash.ToUpperInvariant()) is not null, "Hash lookup must be case-insensitive.");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static async Task TestValueLockService()
+    {
+        int counter = 0;
+        await using ValueLockService service = new(TimeSpan.FromMilliseconds(15));
+        service.Set("counter", () => Interlocked.Increment(ref counter));
+        await Task.Delay(80);
+        service.Remove("counter");
+        True(Volatile.Read(ref counter) >= 2, "Value lock did not enforce repeatedly.");
+    }
+
     private static string CreateValidSave()
     {
         string placeholder = new('0', 64);
@@ -207,5 +312,31 @@ internal static class Program
     private sealed class FakeProcessDetector(bool running) : IGameProcessDetector
     {
         public bool IsGameRunning() => running;
+    }
+
+    private sealed class FakeMemory : IProtectedMemoryAccessor
+    {
+        private const long BaseAddress = 0x1000;
+        private readonly byte[] _bytes = new byte[0x400];
+
+        public int CodeWriteCount { get; private set; }
+
+        public byte[] ReadBytes(nint address, int length)
+        {
+            int offset = checked((int)((long)address - BaseAddress));
+            return _bytes.AsSpan(offset, length).ToArray();
+        }
+
+        public void WriteBytes(nint address, ReadOnlySpan<byte> bytes)
+        {
+            int offset = checked((int)((long)address - BaseAddress));
+            bytes.CopyTo(_bytes.AsSpan(offset, bytes.Length));
+        }
+
+        public void WriteCodeBytes(nint address, ReadOnlySpan<byte> bytes)
+        {
+            CodeWriteCount++;
+            WriteBytes(address, bytes);
+        }
     }
 }
