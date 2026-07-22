@@ -37,6 +37,7 @@ public partial class MainWindow : Window
     private TrainerSession? _trainerSession;
     private GlobalHotkeyService? _hotkeyService;
     private bool _updatingTrainerUi;
+    private JsonTreeEntry? _selectedJsonTreeEntry;
 
     public MainWindow()
     {
@@ -380,6 +381,38 @@ public partial class MainWindow : Window
         }
     }
 
+    private void JsonTreeView_SelectedItemChanged(object sender, RoutedPropertyChangedEventArgs<object> e)
+    {
+        _selectedJsonTreeEntry = e.NewValue as JsonTreeEntry;
+        JsonSelectedPathTextBox.Text = _selectedJsonTreeEntry?.Path ?? string.Empty;
+        JsonSelectedTypeText.Text = _selectedJsonTreeEntry is null
+            ? "未選取節點"
+            : $"型別：{_selectedJsonTreeEntry.Kind}";
+        JsonSelectedValueTextBox.Text = _selectedJsonTreeEntry?.EditableValue ?? string.Empty;
+        bool canEdit = _selectedJsonTreeEntry?.CanEditValue == true;
+        JsonSelectedValueTextBox.IsEnabled = canEdit;
+        ApplySelectedJsonValueButton.IsEnabled = canEdit;
+    }
+
+    private void ApplySelectedJsonValueButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_document is null || _selectedJsonTreeEntry is not { CanEditValue: true } entry)
+        {
+            return;
+        }
+
+        try
+        {
+            entry.ReplaceValue(ParseTreeValue(entry.Kind, JsonSelectedValueTextBox.Text));
+            RefreshAllFields();
+            SetStatus($"{entry.Path} 已套用，尚未寫入磁碟。", false);
+        }
+        catch (Exception exception)
+        {
+            ShowError("JSON 節點值無效", exception);
+        }
+    }
+
     private void RefreshAllFields()
     {
         if (_document is null)
@@ -419,7 +452,53 @@ public partial class MainWindow : Window
         if (_document is not null)
         {
             JsonEditorTextBox.Text = _document.Root.ToJsonString(IndentedJson);
+            JsonTreeView.ItemsSource = new[] { JsonTreeEntry.CreateRoot(_document.Root) };
+            _selectedJsonTreeEntry = null;
+            JsonSelectedPathTextBox.Text = string.Empty;
+            JsonSelectedTypeText.Text = "未選取節點";
+            JsonSelectedValueTextBox.Text = string.Empty;
+            JsonSelectedValueTextBox.IsEnabled = false;
+            ApplySelectedJsonValueButton.IsEnabled = false;
         }
+    }
+
+    private static JsonNode? ParseTreeValue(JsonValueKind kind, string text)
+    {
+        return kind switch
+        {
+            JsonValueKind.String => JsonValue.Create(text),
+            JsonValueKind.Number => ParseScalar(text, JsonValueKind.Number),
+            JsonValueKind.True or JsonValueKind.False => bool.TryParse(text, out bool value)
+                ? JsonValue.Create(value)
+                : throw new FormatException("布林值只能輸入 true 或 false。"),
+            JsonValueKind.Null => ParseScalar(text, expectedKind: null),
+            _ => throw new InvalidOperationException("物件與陣列請在原始 JSON 模式編輯。")
+        };
+    }
+
+    private static JsonNode? ParseScalar(string text, JsonValueKind? expectedKind)
+    {
+        JsonNode? parsed = JsonNode.Parse(text);
+        JsonValueKind actualKind;
+        if (parsed is null)
+        {
+            actualKind = JsonValueKind.Null;
+        }
+        else
+        {
+            using JsonDocument document = JsonDocument.Parse(parsed.ToJsonString());
+            actualKind = document.RootElement.ValueKind;
+        }
+
+        if (actualKind is JsonValueKind.Object or JsonValueKind.Array
+            || expectedKind.HasValue && actualKind != expectedKind.Value)
+        {
+            throw new FormatException(expectedKind.HasValue
+                ? $"必須輸入 {expectedKind.Value} 型別。"
+                : "只能輸入 JSON 純量值。");
+        }
+
+        return parsed;
     }
 
     private string ReadNumber(string propertyName)

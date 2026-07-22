@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using VSModifier.Core.Game;
 using VSModifier.Core.Saves;
@@ -38,6 +39,7 @@ internal static class Program
             ("checksum calculation and application", TestChecksum),
             ("invalid checksum rejection", TestInvalidChecksumRejection),
             ("save editor operations", TestSaveEditor),
+            ("JSON tree scalar editing", TestJsonTreeEditing),
             ("backup and safe write", TestBackupAndSafeWrite),
             ("running game blocks writes", TestRunningGameBlocksWrite),
             ("AOB wildcard matching", TestAobPattern),
@@ -200,6 +202,20 @@ internal static class Program
         JsonArray arcanas = JsonNode.Parse(document.SerializeWithChecksum())!["UnlockedArcanas"]!.AsArray();
         Equal(3, arcanas.Count, "Numeric unlock array count differs.");
         Equal(3, arcanas[0]!.GetValue<int>(), "Numeric unlock type was not preserved.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestJsonTreeEditing()
+    {
+        JsonObject root = JsonNode.Parse("{\"name\":\"Antonio\",\"count\":1,\"items\":[true,null]}")!.AsObject();
+        JsonTreeEntry tree = JsonTreeEntry.CreateRoot(root);
+        Equal(3, tree.Children.Count, "JSON tree top-level count differs.");
+        JsonTreeEntry count = tree.Children.Single(entry => entry.Name == "count");
+        True(count.CanEditValue, "Scalar JSON tree node must be editable.");
+        count.ReplaceValue(JsonNode.Parse("2.5"));
+        Equal(2.5d, root["count"]!.GetValue<double>(), "JSON tree replacement did not update the source object.");
+        JsonTreeEntry nullEntry = tree.Children.Single(entry => entry.Name == "items").Children[1];
+        Equal(JsonValueKind.Null, nullEntry.Kind, "JSON tree must preserve null node kind.");
         return Task.CompletedTask;
     }
 
