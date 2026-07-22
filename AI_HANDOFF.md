@@ -92,3 +92,5 @@
 - 版本化解鎖與金蛋單屬性里程碑驗證：全方案建置 0 警告／0 錯誤，15/15 測試通過；實際安裝的三檔 Profile 與對應 unlock Profile 同時命中，IdExtractor 已驗證可保留多 Profile 且更新同 ID 不重複。實際 WPF QA 顯示 21 個已知金蛋屬性皆完整可選、中文標籤與目前值區無裁切；解鎖頁 dictionary 說明亦完整。QA 未套用或寫入存檔。
 - 線上防護稽核發現原本只在值鎖寫入前檢查，code patch 單獨啟用時缺少持續 guard，背景失敗也只移除單一 lock。已改為附加後永遠啟用 100ms guard；偵測線上或任一背景失敗時 fail-closed 清除全部 locks、還原所有值與 patches、透過 `SafetyStopped` 通知 WPF 自動中斷。複合 patch 還原失敗時保留 enabled 狀態，允許 Dispose 再次嘗試。
 - 持續線上 guard 變更已完成建置 0 警告／0 錯誤與 15/15 測試；回歸證明 fail-closed 事件後所有 locks 停止，複合 patch 還原失敗後可第二次重試成功。尚未在單人關卡實測實際 guard 位址，Profile 仍必須保持 `verified: false`。
+- UI 規格稽核發現底部狀態列未持續顯示目前存檔路徑與遊戲文字狀態，最近備份也只記住本次執行。已補上完整路徑（畫面省略、ToolTip 保留全文）、紅綠燈加可否安全寫入文字，並於啟動時掃描 `%LOCALAPPDATA%\VSModifier\backups` 顯示最新備份時間。
+- 新狀態列已完成建置、15/15 測試、live read-only 與實際 WPF 畫面 QA；在預設視窗大小下遊戲狀態、一般訊息、路徑省略與最近備份可同時閱讀，沒有重疊或裁切。QA 未寫入存檔。

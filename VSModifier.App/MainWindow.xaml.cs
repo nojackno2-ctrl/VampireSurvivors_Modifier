@@ -66,6 +66,7 @@ public partial class MainWindow : Window
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
+        RefreshLatestBackupStatus();
         UnlockPropertyComboBox.SelectedIndex = 0;
         EggAttributeComboBox.SelectedIndex = 0;
         DetectSavePath();
@@ -98,6 +99,8 @@ public partial class MainWindow : Window
         bool running = _processDetector.IsGameRunning();
         GameStatusLight.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#EF4444" : "#22C55E"));
         GameStatusLight.ToolTip = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
+        GameStatusText.Text = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
+        GameStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#FCA5A5" : "#86EFAC"));
         SaveButton.IsEnabled = _document is not null && !running;
         AttachTrainerButton.IsEnabled = running
             && _trainerSession is null
@@ -151,6 +154,9 @@ public partial class MainWindow : Window
         {
             SetBusy(true, "正在驗證並載入存檔…");
             _document = await _saveFileService.LoadAsync(SavePathTextBox.Text);
+            string fullSavePath = Path.GetFullPath(SavePathTextBox.Text);
+            CurrentSavePathStatusText.Text = $"存檔：{fullSavePath}";
+            CurrentSavePathStatusText.ToolTip = fullSavePath;
             RefreshAllFields();
             MainTabs.IsEnabled = true;
             ReloadButton.IsEnabled = true;
@@ -199,10 +205,7 @@ public partial class MainWindow : Window
         try
         {
             SetBusy(true, "正在備份並安全寫入…");
-            string backupDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "VSModifier",
-                "backups");
+            string backupDirectory = GetBackupDirectory();
             SaveWriteResult result = await _saveFileService.SaveAsync(SavePathTextBox.Text, _document, backupDirectory);
             _lastBackupPath = result.BackupPath;
             BackupPathText.Text = result.BackupPath;
@@ -443,6 +446,40 @@ public partial class MainWindow : Window
         RefreshEggCurrentValue();
         RefreshJsonEditor();
         BackupPathText.Text = _lastBackupPath ?? "尚未由本程式建立備份";
+    }
+
+    private void RefreshLatestBackupStatus()
+    {
+        try
+        {
+            DirectoryInfo directory = new(GetBackupDirectory());
+            FileInfo? latest = directory.Exists
+                ? directory.EnumerateFiles("SaveData_*.json", SearchOption.TopDirectoryOnly)
+                    .OrderByDescending(file => file.LastWriteTime)
+                    .FirstOrDefault()
+                : null;
+            if (latest is null)
+            {
+                BackupStatusText.Text = "最近備份：尚無";
+                return;
+            }
+
+            _lastBackupPath = latest.FullName;
+            BackupStatusText.Text = $"最近備份：{latest.LastWriteTime:G}";
+            BackupStatusText.ToolTip = latest.FullName;
+        }
+        catch
+        {
+            BackupStatusText.Text = "最近備份：無法讀取";
+        }
+    }
+
+    private static string GetBackupDirectory()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "VSModifier",
+            "backups");
     }
 
     private void RefreshUnlockEditor()
