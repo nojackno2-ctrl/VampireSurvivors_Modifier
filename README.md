@@ -2,6 +2,8 @@
 
 Vampire Survivors 的 C# WPF 存檔修改器與外部記憶體 Trainer。專案遵守一項硬性原則：**不修改或新增遊戲安裝資料夾內的任何檔案**。
 
+公開原始碼：[nojackno2-ctrl/VampireSurvivors_Modifier](https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier)
+
 > 目前正在依 `DESIGN.md` 開發。存檔 checksum 算法已使用本機實際 SaveData 唯讀驗證；Trainer 功能在版本偏移與實機行為完成驗證前不會標示為可用。
 
 ## 使用 Visual Studio
