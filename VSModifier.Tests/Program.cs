@@ -9,8 +9,13 @@ internal static class Program
 {
     private static readonly UTF8Encoding Utf8WithoutBom = new(false, true);
 
-    public static async Task<int> Main()
+    public static async Task<int> Main(string[] args)
     {
+        if (args.Contains("--live-read-only", StringComparer.OrdinalIgnoreCase))
+        {
+            return await RunLiveReadOnlyCheck();
+        }
+
         (string Name, Func<Task> Run)[] tests =
         [
             ("checksum calculation and application", TestChecksum),
@@ -37,6 +42,22 @@ internal static class Program
 
         Console.WriteLine($"{tests.Length - failures}/{tests.Length} tests passed.");
         return failures == 0 ? 0 : 1;
+    }
+
+    private static async Task<int> RunLiveReadOnlyCheck()
+    {
+        IReadOnlyList<SaveCandidate> candidates = new SavePathLocator().FindCandidates();
+        if (candidates.Count == 0)
+        {
+            Console.Error.WriteLine("FAIL  no Steam SaveData candidate was found.");
+            return 1;
+        }
+
+        SaveDocument document = await new SaveFileService().LoadAsync(candidates[0].Path);
+        Console.WriteLine($"PASS  located {candidates.Count} SaveData candidate(s).");
+        Console.WriteLine($"PASS  live checksum valid: {document.OriginalChecksumIsValid}.");
+        Console.WriteLine($"PASS  parsed {document.Root.Count} top-level fields without writing.");
+        return document.OriginalChecksumIsValid ? 0 : 1;
     }
 
     private static Task TestChecksum()
