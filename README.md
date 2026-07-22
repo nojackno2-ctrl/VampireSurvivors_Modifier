@@ -10,11 +10,14 @@ Vampire Survivors 的 C# WPF 存檔修改器與外部記憶體 Trainer。專案�
 2. 將 `VSModifier.App` 設為啟始專案。
 3. 選擇 x64 或 Any CPU 後建置並執行。
 
+需要建立可散布資料夾時，在 `VSModifier.App` 上按右鍵選擇「發佈」，使用內建的 `win-x64-folder` Profile。此設定為 Release、x64、framework-dependent，因此目標電腦必須安裝 .NET 10 Desktop Runtime；發布目錄會包含 `README.md`、`LICENSE` 與版本化 data，並排除 PDB。Trainer Profile 尚未完成實機驗證時不得把整體 Trainer 宣稱為可用。
+
 命令列驗證：
 
 ```powershell
 dotnet build VSModifier.sln
 dotnet run --project VSModifier.Tests
+dotnet publish VSModifier.App -p:PublishProfile=win-x64-folder
 ```
 
 ## AI 代理接手

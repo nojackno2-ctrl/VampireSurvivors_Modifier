@@ -99,3 +99,5 @@
 - 再次重跑主選單 Trainer 唯讀診斷：精確命中目前 Profile，`gameSpeed=1` 與 `maxTreasure` 兩段位元組可讀；`onlineSession` 與其餘 22 項仍在指標鏈第 3 層得到 null，合計 2/24。退出碼 1 代表 guard 尚不可解析、不是建置失敗；沒有進行任何記憶體寫入。
 - 已新增僅供開發的受控驗證路徑：未驗證 Profile 仍不能由正式 WPF 附加；開發命令必須精確指定目前 Profile ID、一次只允許單一功能、限制 100–5000ms，並沿用 100ms 線上 guard。數值與 patch 都會在結束時還原並讀回確認；還原第一次失敗時保留追蹤狀態，供 `DisposeAsync` 再試。
 - 受控驗證工具離線里程碑：全方案建置 0 警告／0 錯誤，16/16 測試通過。新增測試證明正式附加仍拒絕 `verified: false`，且開發驗證會拒絕錯誤 Profile ID、錯誤功能類型與超過 5 秒的要求。尚未執行任何受控寫入；必須等使用者進入單人關卡，唯讀確認 `onlineSession=0` 後才可逐項執行。
+- 發行內容重新稽核時，framework-dependent win-x64 第一份產物確認禁止檔與 PDB 均為 0，但缺少 `README.md` 與 `LICENSE`。修正後以全新輸出目錄重跑：必要檔 8/8、禁止檔 0、PDB 0，Release 建置 0 警告／0 錯誤且 16/16 測試通過。兩份文件與兩份版本 data 已明確設為輸出項目，並新增 Visual Studio `win-x64-folder` 發布 Profile；Profile 仍為 `verified: false`，不得對外宣稱 Trainer 可用。
+- 第一次實際改用 `win-x64-folder.pubxml` 發布時，App 本身沒有 PDB，但 Core／Memory 專案參考仍產生 2 個 PDB；原因是 `.pubxml` 的偵錯屬性只屬於 App，未全域傳遞。新增方案層級 `Directory.Build.props` 後，以第三個全新輸出目錄重測成功：必要檔 8/8、禁止檔 0、PDB 0，Release 0 警告／0 錯誤且 16/16 測試通過。再壓成測試 ZIP 後直接檢查 ZIP entries，必要檔、`data` 子目錄與 0 禁止檔／0 PDB 均保持正確；稽核產物只在已忽略的 `artifacts/`，尚未對外發布。
