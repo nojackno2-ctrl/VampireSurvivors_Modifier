@@ -1,0 +1,26 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+TestResults/
+artifacts/
+
+# Game and reverse-engineering files (never publish)
+*.dll
+dump/
+dump.cs
+il2cpp.h
+script.json
+global-metadata.dat
+GameAssembly.dll
+
+# Personal saves and backups
+SaveData
+SaveData*
+backups/
+
+# Local offset research
+data/offsets.local.json
+*.log
