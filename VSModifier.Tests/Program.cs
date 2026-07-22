@@ -28,6 +28,11 @@ internal static class Program
             return RunTrainerReadOnlyInspection();
         }
 
+        if (args.Contains("--inspect-time-scale-read-only", StringComparer.OrdinalIgnoreCase))
+        {
+            return RunTimeScaleReadOnlyInspection();
+        }
+
         (string Name, Func<Task> Run)[] tests =
         [
             ("checksum calculation and application", TestChecksum),
@@ -37,6 +42,7 @@ internal static class Program
             ("running game blocks writes", TestRunningGameBlocksWrite),
             ("AOB wildcard matching", TestAobPattern),
             ("pointer chain resolution", TestPointerChain),
+            ("profile AOB RIP-relative resolution", TestProfileAobResolution),
             ("reversible memory patch", TestMemoryPatch),
             ("offset catalog parsing", TestOffsetCatalog),
             ("value lock enforcement", TestValueLockService)
@@ -106,6 +112,36 @@ internal static class Program
         int successes = result.Features.Count(feature => feature.Success);
         Console.WriteLine($"Read-only feature chains: {successes}/{result.Features.Count} resolved.");
         return result.OnlineSession.Success ? 0 : 1;
+    }
+
+    private static int RunTimeScaleReadOnlyInspection()
+    {
+        const long timeScaleGetterPointerRva = 0x9DF0F08;
+        const long timeScaleSetterPointerRva = 0x9DF0F10;
+
+        using ProcessMemorySession memory = ProcessMemorySession.AttachReadOnly();
+        ProcessModuleInfo gameAssembly = memory.GetModuleInfo("GameAssembly.dll");
+        ProcessModuleInfo unityPlayer = memory.GetModuleInfo("UnityPlayer.dll");
+        nint getter = ReadPointer(memory, checked(gameAssembly.BaseAddress + (nint)timeScaleGetterPointerRva));
+        nint setter = ReadPointer(memory, checked(gameAssembly.BaseAddress + (nint)timeScaleSetterPointerRva));
+
+        PrintNativeTarget("Time.get_timeScale", getter, unityPlayer);
+        PrintNativeTarget("Time.set_timeScale", setter, unityPlayer);
+        return getter != 0 && setter != 0 ? 0 : 1;
+    }
+
+    private static nint ReadPointer(ProcessMemorySession memory, nint address)
+    {
+        return (nint)BitConverter.ToInt64(memory.ReadBytes(address, sizeof(long)));
+    }
+
+    private static void PrintNativeTarget(string name, nint address, ProcessModuleInfo unityPlayer)
+    {
+        long rva = (long)address - (long)unityPlayer.BaseAddress;
+        bool belongsToUnityPlayer = rva >= 0 && rva < unityPlayer.Size;
+        Console.WriteLine(
+            $"{name}: address=0x{address:X}; "
+            + (belongsToUnityPlayer ? $"UnityPlayer.dll+0x{rva:X}" : "outside UnityPlayer.dll"));
     }
 
     private static void PrintDiagnostic(DiagnosticValue value)
@@ -236,6 +272,32 @@ internal static class Program
         memory.Write((nint)0x1020, (nint)0x1100);
         nint resolved = PointerChain.Resolve(memory, (nint)0x1000, [0x20, 0x08]);
         Equal((nint)0x1108, resolved, "Pointer chain produced the wrong address.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestProfileAobResolution()
+    {
+        FakeMemory memory = new();
+        nint match = (nint)0x1010;
+        nint pointerSlot = (nint)0x1080;
+        int displacement = checked((int)((long)pointerSlot - ((long)match + 7)));
+        memory.WriteBytes(match,
+        [
+            0x48, 0x8B, 0x05,
+            .. BitConverter.GetBytes(displacement),
+            0xF3, 0x0F, 0x10, 0x80, 0xAC, 0x01, 0x00, 0x00, 0xC3
+        ]);
+        memory.Write(pointerSlot, (nint)0x1100);
+        AddressDefinition definition = new()
+        {
+            Module = "UnityPlayer.dll",
+            Aob = "48 8B 05 ?? ?? ?? ?? F3 0F 10 80 AC 01 00 00 C3",
+            RipRelativeOffset = 3,
+            PointerOffsets = [0, 0x1AC]
+        };
+
+        nint resolved = ProfileAddressResolver.ResolveFromModule(memory, (nint)0x1000, 0x200, definition);
+        Equal((nint)0x12AC, resolved, "AOB RIP-relative resolution produced the wrong address.");
         return Task.CompletedTask;
     }
 

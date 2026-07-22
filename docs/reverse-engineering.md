@@ -16,5 +16,7 @@
 - 屬性入口：`CharacterController._playerStats +0x218`
 - `PlayerModifierStats` 多數欄位是 `EggFloat`/`EggDouble` 物件，實際基礎值在該物件 `+0x10`；Charm (`+0xB4`) 與 Defang (`+0xB8`) 是直接值。
 - 即時快速寶箱候選：`GameManager._playerOptions +0x90` → `PlayerOptions._mainGameConfig +0x50` → `PlayerOptionsData.AlwaysQuickTreasureAnim +0x159`。
+- 遊戲速率已完成唯讀實機定位：`Time.get_timeScale` 解析到 `UnityPlayer.dll + 0xB7D40`，其指令以 RIP-relative 方式取得 TimeManager 全域指標，`TimeManager + 0x1AC` 為 `timeScale`。
+- `gameSpeed` 不使用固定 `UnityPlayer.dll` RVA；profile 以唯一 AOB `48 8B 05 ?? ?? ?? ?? F3 0F 10 80 AC 01 00 00 C3` 找 getter，再解析位移與指標鏈。主選單唯讀值為 `1.0`，尚未做寫入測試。
 
 在讀取鏈路、合理值範圍、線上 guard 與實際遊戲效果全部驗證前，不得把此 profile 改為 `verified: true`。

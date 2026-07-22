@@ -72,6 +72,12 @@ public sealed class AddressDefinition
 
     public long BaseOffset { get; init; }
 
+    public string? Aob { get; init; }
+
+    public int AobOffset { get; init; }
+
+    public int? RipRelativeOffset { get; init; }
+
     public List<long> PointerOffsets { get; init; } = [];
 }
 
