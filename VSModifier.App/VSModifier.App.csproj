@@ -5,6 +5,10 @@
     <ProjectReference Include="..\VSModifier.Memory\VSModifier.Memory.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="..\data\offsets.json" Link="data\offsets.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>
