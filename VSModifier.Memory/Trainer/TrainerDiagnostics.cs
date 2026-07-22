@@ -72,10 +72,13 @@ public static class TrainerDiagnostics
     {
         try
         {
-            nint address = ProfileAddressResolver.Resolve(memory, feature.Address);
-            int size = ParseByteCount(feature.ExpectedBytes ?? feature.PatchBytes);
-            _ = memory.ReadBytes(address, size);
-            return new DiagnosticValue(key, true, address, null, null);
+            nint firstAddress = ReadPatchSegment(memory, feature.Address, feature.ExpectedBytes, feature.PatchBytes);
+            foreach (PatchSegmentDefinition segment in feature.AdditionalPatches)
+            {
+                _ = ReadPatchSegment(memory, segment.Address, segment.ExpectedBytes, segment.PatchBytes);
+            }
+
+            return new DiagnosticValue(key, true, firstAddress, null, null);
         }
         catch (Exception exception)
         {
@@ -83,11 +86,34 @@ public static class TrainerDiagnostics
         }
     }
 
-    private static int ParseByteCount(string? value)
+    private static nint ReadPatchSegment(
+        ProcessMemorySession memory,
+        AddressDefinition addressDefinition,
+        string? expectedBytes,
+        string? patchBytes)
     {
-        return string.IsNullOrWhiteSpace(value)
-            ? throw new InvalidDataException("Patch 缺少 expectedBytes/patchBytes。")
-            : value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Length;
+        nint address = ProfileAddressResolver.Resolve(memory, addressDefinition);
+        byte[] expected = ParseBytes(expectedBytes ?? patchBytes);
+        byte[] actual = memory.ReadBytes(address, expected.Length);
+        if (!actual.AsSpan().SequenceEqual(expected))
+        {
+            throw new InvalidDataException($"位址 0x{address:X} 的原始程式碼位元組與 profile 不符。");
+        }
+
+        return address;
+    }
+
+    private static byte[] ParseBytes(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidDataException("Patch 缺少 expectedBytes/patchBytes。");
+        }
+
+        string compact = string.Concat(value.Split(
+            ' ',
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        return Convert.FromHexString(compact);
     }
 
     private static int SizeOf(MemoryValueType type) => type switch
