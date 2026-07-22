@@ -8,6 +8,7 @@ using VSModifier.Memory.Patching;
 using VSModifier.Memory.ProcessMemory;
 using VSModifier.Memory.Profiles;
 using VSModifier.Memory.Scanning;
+using VSModifier.Memory.Trainer;
 
 namespace VSModifier.Tests;
 
@@ -20,6 +21,11 @@ internal static class Program
         if (args.Contains("--live-read-only", StringComparer.OrdinalIgnoreCase))
         {
             return await RunLiveReadOnlyCheck();
+        }
+
+        if (args.Contains("--inspect-trainer-read-only", StringComparer.OrdinalIgnoreCase))
+        {
+            return RunTrainerReadOnlyInspection();
         }
 
         (string Name, Func<Task> Run)[] tests =
@@ -84,6 +90,32 @@ internal static class Program
         return document.OriginalChecksumIsValid && profile is { Verified: false } ? 0 : 1;
     }
 
+    private static int RunTrainerReadOnlyInspection()
+    {
+        GameInstallation installation = new GameInstallationLocator().FindInstallations().FirstOrDefault()
+            ?? throw new InvalidOperationException("找不到完整遊戲安裝。");
+        OffsetCatalog catalog = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
+        TrainerDiagnosticResult result = TrainerDiagnostics.InspectReadOnly(catalog, installation.GameAssemblyPath);
+        Console.WriteLine($"Profile: {result.ProfileLabel}; verified={result.ProfileVerified}");
+        PrintDiagnostic(result.OnlineSession);
+        foreach (DiagnosticValue feature in result.Features)
+        {
+            PrintDiagnostic(feature);
+        }
+
+        int successes = result.Features.Count(feature => feature.Success);
+        Console.WriteLine($"Read-only feature chains: {successes}/{result.Features.Count} resolved.");
+        return result.OnlineSession.Success ? 0 : 1;
+    }
+
+    private static void PrintDiagnostic(DiagnosticValue value)
+    {
+        string detail = value.Success
+            ? value.Value.HasValue ? $"value={value.Value.Value:R}" : "bytes readable"
+            : $"error={value.Error}";
+        Console.WriteLine($"{(value.Success ? "PASS" : "WAIT")}  {value.Key}: {detail}");
+    }
+
     private static Task TestChecksum()
     {
         string placeholder = new('0', 64);
@@ -125,7 +157,12 @@ internal static class Program
         Equal(1_000_000_000_000d, root["Coins"]!.GetValue<double>(), "Coins were not maximized.");
         True(root["AlwaysQuickTreasureAnim"]!.GetValue<bool>(), "Quick treasure flag was not enabled.");
         Equal(15d, root["EggData"]!["ANTONIO"]!["total"]!.GetValue<double>(), "Egg total was not synchronized.");
-        Equal(2, root["UnlockedCharacters"]!.AsArray().Count, "Unlock IDs were not deduplicated.");
+        Equal(3, root["UnlockedCharacters"]!.AsArray().Count, "Unlock array duplicates must be preserved.");
+
+        editor.ReplaceArray("UnlockedArcanas", new JsonNode?[] { JsonValue.Create(3), JsonValue.Create(3), JsonValue.Create(7) });
+        JsonArray arcanas = JsonNode.Parse(document.SerializeWithChecksum())!["UnlockedArcanas"]!.AsArray();
+        Equal(3, arcanas.Count, "Numeric unlock array count differs.");
+        Equal(3, arcanas[0]!.GetValue<int>(), "Numeric unlock type was not preserved.");
         return Task.CompletedTask;
     }
 

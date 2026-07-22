@@ -26,6 +26,16 @@ dotnet run --project VSModifier.Tests
 - 線上模式必須自動停用記憶體功能。
 - 僅限單機與本地遊玩使用；成就與遊戲內 `CheatCodeUsed` 狀態的影響由使用者自行承擔。
 
+## 遊戲更新與資料抽取
+
+遊戲改版後，先用官方 Il2CppDumper 對自己的 `GameAssembly.dll` 與 `global-metadata.dat` 產生 `dump.cs`。完整 dump 不得加入 repo；只可執行：
+
+```powershell
+dotnet run --project VSModifier.IdExtractor -- <dump.cs> data\ids\unlocks.json
+```
+
+工具會抽出版本對應的角色、武器、關卡、Arcana、成就等事實性 ID。PowerUp 陣列以重複 ID 表示等級，抽取工具刻意不覆蓋，避免「全解鎖」反而降低既有等級。Trainer 偏移仍須另行分析並逐項實機驗證；未驗證 profile 一律拒絕附加。
+
 ## 版權與隱私
 
 本專案不包含 poncle 的遊戲檔案、metadata、Il2CppDumper 完整輸出、遊戲素材或個人 SaveData，亦與 poncle 無關。

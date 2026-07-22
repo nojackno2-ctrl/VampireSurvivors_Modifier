@@ -5,8 +5,35 @@
       "gameAssemblySha256": "f43017baa184cc6a5d6f6cc41d5bce28eaba5e164083dfa2ecb136fbbdb00dab",
       "label": "local build 2026-07-19",
       "verified": false,
-      "onlineSession": null,
-      "features": {}
+      "onlineSession": {
+        "module": "GameAssembly.dll",
+        "baseOffset": 160283072,
+        "pointerOffsets": [0, 184, 0, 905]
+      },
+      "features": {
+        "invulnerability": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 844] } },
+        "quickTreasure": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 144, 80, 345] } },
+        "damageMultiplier": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 16, 16] } },
+        "stat.growth": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 48, 16] } },
+        "stat.greed": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 96, 16] } },
+        "stat.luck": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 56, 16] } },
+        "stat.cooldown": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 72, 16] } },
+        "stat.moveSpeed": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 40, 16] } },
+        "stat.area": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 24, 16] } },
+        "stat.amount": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 80, 16] } },
+        "stat.duration": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 64, 16] } },
+        "stat.speed": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 32, 16] } },
+        "stat.armor": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 88, 16] } },
+        "stat.regen": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 104, 16] } },
+        "stat.magnet": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 136, 16] } },
+        "stat.revivals": { "kind": "value", "valueType": "double", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 160, 16] } },
+        "stat.rerolls": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 112, 16] } },
+        "stat.skips": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 120, 16] } },
+        "stat.banish": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 152, 16] } },
+        "stat.curse": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 144, 16] } },
+        "stat.charm": { "kind": "value", "valueType": "int32", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 180] } },
+        "stat.defang": { "kind": "value", "valueType": "float", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 536, 184] } }
+      }
     }
   ]
 }

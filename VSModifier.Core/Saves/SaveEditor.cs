@@ -44,12 +44,37 @@ public sealed class SaveEditor(SaveDocument document)
         foreach ((string propertyName, IReadOnlyCollection<string> ids) in idSets)
         {
             JsonArray array = [];
-            foreach (string id in ids.Where(id => !string.IsNullOrWhiteSpace(id)).Distinct(StringComparer.Ordinal))
+            foreach (string id in ids.Where(id => !string.IsNullOrWhiteSpace(id)))
             {
                 array.Add(id);
             }
 
             _root[propertyName] = array;
+        }
+    }
+
+    public void ReplaceArray(string propertyName, IEnumerable<JsonNode?> values)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(propertyName);
+        ArgumentNullException.ThrowIfNull(values);
+        JsonArray array = [];
+        foreach (JsonNode? value in values)
+        {
+            array.Add(value?.DeepClone());
+        }
+
+        _root[propertyName] = array;
+    }
+
+    public void ApplyUnlockCatalog(JsonObject catalog)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        foreach ((string propertyName, JsonNode? value) in catalog)
+        {
+            if (value is JsonArray array)
+            {
+                ReplaceArray(propertyName, array);
+            }
         }
     }
 
