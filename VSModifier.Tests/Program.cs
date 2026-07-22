@@ -534,6 +534,31 @@ internal static class Program
                 new string('d', 64)));
             True(metadataMismatch.Profile is null && metadataMismatch.Error!.Contains("global-metadata", StringComparison.Ordinal),
                 "Metadata mismatch must fail with a specific reason.");
+
+            File.WriteAllText(path, $$"""
+                {
+                  "schemaVersion": 2,
+                  "profiles": [
+                    {
+                      "profileId": "invalid-patch",
+                      "gameAssemblySha256": "{{hash}}",
+                      "unityPlayerSha256": "{{new string('b', 64)}}",
+                      "il2CppMetadataSha256": "{{new string('c', 64)}}",
+                      "label": "invalid",
+                      "verified": false,
+                      "features": {
+                        "bad": {
+                          "kind": "patch",
+                          "address": { "module": "GameAssembly.dll", "baseOffset": 16 },
+                          "expectedBytes": "90 90",
+                          "patchBytes": "90"
+                        }
+                      }
+                    }
+                  ]
+                }
+                """, Utf8WithoutBom);
+            Throws<InvalidDataException>(() => OffsetCatalog.Load(path));
         }
         finally
         {

@@ -94,3 +94,5 @@
 - 持續線上 guard 變更已完成建置 0 警告／0 錯誤與 15/15 測試；回歸證明 fail-closed 事件後所有 locks 停止，複合 patch 還原失敗後可第二次重試成功。尚未在單人關卡實測實際 guard 位址，Profile 仍必須保持 `verified: false`。
 - UI 規格稽核發現底部狀態列未持續顯示目前存檔路徑與遊戲文字狀態，最近備份也只記住本次執行。已補上完整路徑（畫面省略、ToolTip 保留全文）、紅綠燈加可否安全寫入文字，並於啟動時掃描 `%LOCALAPPDATA%\VSModifier\backups` 顯示最新備份時間。
 - 新狀態列已完成建置、15/15 測試、live read-only 與實際 WPF 畫面 QA；在預設視窗大小下遊戲狀態、一般訊息、路徑省略與最近備份可同時閱讀，沒有重疊或裁切。QA 未寫入存檔。
+- 版本 Profile 安全稽核發現 schema 尚未驗證 AOB／RIP 範圍、patch 等長性或已驗證 Profile 的功能完整度。已新增結構驗證：所有 address、AOB、patch bytes 與 feature kind/value type 都先驗證；`verified: true` 必須具備線上 guard 與 24 個主要／第二波功能，避免未完整或手誤 Profile 被啟用。
+- Profile schema 強化已完成建置 0 警告／0 錯誤、15/15 測試與 live read-only；目前 Profile 可通過，測試中的不同長度 patch 會在 catalog 載入時被拒絕。
