@@ -8,21 +8,28 @@ namespace VSModifier.Memory.Trainer;
 
 public sealed class TrainerSession : IAsyncDisposable
 {
+    private const string SafetyGuardKey = "__onlineSessionGuard";
     private readonly ProcessMemorySession _memory;
-    private readonly ValueLockService _locks = new();
+    private readonly ValueLockService _locks = new(stopAllOnFailure: true);
+    private readonly object _stateGate = new();
     private readonly Dictionary<string, byte[]> _originalValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MemoryPatchSet> _patches = new(StringComparer.Ordinal);
+    private Exception? _safetyStopCause;
     private bool _disposed;
 
     private TrainerSession(ProcessMemorySession memory, GameVersionProfile profile)
     {
         _memory = memory;
         Profile = profile;
+        _locks.LockFailed += Locks_LockFailed;
+        _locks.Set(SafetyGuardKey, EnsureOffline);
     }
 
     public GameVersionProfile Profile { get; }
 
     public bool IsAttached => !_disposed && !_memory.HasExited;
+
+    public event EventHandler<TrainerSafetyStopEventArgs>? SafetyStopped;
 
     public static TrainerSession Attach(
         OffsetCatalog catalog,
@@ -48,166 +55,178 @@ public sealed class TrainerSession : IAsyncDisposable
             throw new InvalidOperationException("此版本缺少線上會話防護偏移，已拒絕附加。");
         }
 
-        return new TrainerSession(ProcessMemorySession.Attach(), profile);
+        ProcessMemorySession memory = ProcessMemorySession.Attach();
+        try
+        {
+            return new TrainerSession(memory, profile);
+        }
+        catch
+        {
+            memory.Dispose();
+            throw;
+        }
     }
 
     public void EnableValueLock(string featureKey, double value)
     {
-        ThrowIfDisposed();
-        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-        nint address = Resolve(feature.Address);
-        byte[] desired = EncodeValue(feature.ValueType, value);
-        _originalValues.TryAdd(featureKey, _memory.ReadBytes(address, desired.Length));
-        _locks.Set(featureKey, () =>
+        lock (_stateGate)
         {
-            EnsureOffline();
-            if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, desired.Length)) == 0)
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            nint address = Resolve(feature.Address);
+            byte[] desired = EncodeValue(feature.ValueType, value);
+            _originalValues.TryAdd(featureKey, _memory.ReadBytes(address, desired.Length));
+            _locks.Set(featureKey, () =>
             {
-                return;
-            }
+                EnsureOffline();
+                if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, desired.Length)) == 0)
+                {
+                    return;
+                }
 
-            _memory.WriteBytes(address, desired);
-        });
+                _memory.WriteBytes(address, desired);
+            });
+        }
     }
 
     public void EnableMultiplierLock(string featureKey, double multiplier)
     {
-        ThrowIfDisposed();
+        ThrowIfUnavailable();
         if (!double.IsFinite(multiplier) || multiplier < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(multiplier));
         }
 
-        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-        nint address = Resolve(feature.Address);
-        int size = GetValueSize(feature.ValueType);
-        if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+        lock (_stateGate)
         {
-            original = _memory.ReadBytes(address, size);
-            _originalValues.Add(featureKey, original);
-        }
-
-        double originalValue = DecodeValue(feature.ValueType, original);
-        byte[] desired = EncodeValue(feature.ValueType, originalValue * multiplier);
-        _locks.Set(featureKey, () =>
-        {
-            EnsureOffline();
-            if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, size)) == 0)
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            nint address = Resolve(feature.Address);
+            int size = GetValueSize(feature.ValueType);
+            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
             {
-                return;
+                original = _memory.ReadBytes(address, size);
+                _originalValues.Add(featureKey, original);
             }
 
-            _memory.WriteBytes(address, desired);
-        });
+            double originalValue = DecodeValue(feature.ValueType, original);
+            byte[] desired = EncodeValue(feature.ValueType, originalValue * multiplier);
+            _locks.Set(featureKey, () =>
+            {
+                EnsureOffline();
+                if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, size)) == 0)
+                {
+                    return;
+                }
+
+                _memory.WriteBytes(address, desired);
+            });
+        }
     }
 
     public void EnableAdditiveLock(string featureKey, double amount)
     {
-        ThrowIfDisposed();
+        ThrowIfUnavailable();
         if (!double.IsFinite(amount))
         {
             throw new ArgumentOutOfRangeException(nameof(amount));
         }
 
-        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-        nint address = Resolve(feature.Address);
-        int size = GetValueSize(feature.ValueType);
-        if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+        lock (_stateGate)
         {
-            original = _memory.ReadBytes(address, size);
-            _originalValues.Add(featureKey, original);
-        }
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            nint address = Resolve(feature.Address);
+            int size = GetValueSize(feature.ValueType);
+            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+            {
+                original = _memory.ReadBytes(address, size);
+                _originalValues.Add(featureKey, original);
+            }
 
-        byte[] desired = EncodeValue(feature.ValueType, DecodeValue(feature.ValueType, original) + amount);
-        _locks.Set(featureKey, () =>
-        {
-            EnsureOffline();
-            _memory.WriteBytes(address, desired);
-        });
+            byte[] desired = EncodeValue(feature.ValueType, DecodeValue(feature.ValueType, original) + amount);
+            _locks.Set(featureKey, () =>
+            {
+                EnsureOffline();
+                _memory.WriteBytes(address, desired);
+            });
+        }
     }
 
     public void DisableValueLock(string featureKey, bool restoreOriginal = true)
     {
-        ThrowIfDisposed();
-        _locks.Remove(featureKey);
-        if (!restoreOriginal || !_originalValues.Remove(featureKey, out byte[]? original))
+        lock (_stateGate)
         {
-            return;
-        }
+            ThrowIfUnavailable();
+            _locks.Remove(featureKey);
+            if (!restoreOriginal || !_originalValues.Remove(featureKey, out byte[]? original))
+            {
+                return;
+            }
 
-        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-        _memory.WriteBytes(Resolve(feature.Address), original);
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            _memory.WriteBytes(Resolve(feature.Address), original);
+        }
     }
 
     public void EnablePatch(string featureKey)
     {
-        ThrowIfDisposed();
-        if (_patches.ContainsKey(featureKey))
+        lock (_stateGate)
         {
-            return;
-        }
+            ThrowIfUnavailable();
+            if (_patches.ContainsKey(featureKey))
+            {
+                return;
+            }
 
-        EnsureOffline();
-        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Patch);
-        List<MemoryPatch> segments =
-        [
-            CreatePatch(feature.Address, feature.ExpectedBytes, feature.PatchBytes)
-        ];
-        segments.AddRange(feature.AdditionalPatches.Select(segment =>
-            CreatePatch(segment.Address, segment.ExpectedBytes, segment.PatchBytes)));
-        MemoryPatchSet patchSet = new(segments);
-        patchSet.Enable();
-        _patches.Add(featureKey, patchSet);
+            EnsureOffline();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Patch);
+            List<MemoryPatch> segments =
+            [
+                CreatePatch(feature.Address, feature.ExpectedBytes, feature.PatchBytes)
+            ];
+            segments.AddRange(feature.AdditionalPatches.Select(segment =>
+                CreatePatch(segment.Address, segment.ExpectedBytes, segment.PatchBytes)));
+            MemoryPatchSet patchSet = new(segments);
+            patchSet.Enable();
+            _patches.Add(featureKey, patchSet);
+        }
     }
 
     public void DisablePatch(string featureKey)
     {
-        ThrowIfDisposed();
-        if (_patches.Remove(featureKey, out MemoryPatchSet? patch))
+        lock (_stateGate)
         {
-            patch.Dispose();
+            ThrowIfUnavailable();
+            if (_patches.Remove(featureKey, out MemoryPatchSet? patch))
+            {
+                patch.Dispose();
+            }
         }
     }
 
     public async ValueTask DisposeAsync()
     {
-        if (_disposed)
+        lock (_stateGate)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _locks.LockFailed -= Locks_LockFailed;
         }
 
-        _disposed = true;
         Exception? restorationError = null;
         try
         {
             await _locks.DisposeAsync();
-            if (!_memory.HasExited)
+            lock (_stateGate)
             {
-                foreach (MemoryPatchSet patch in _patches.Values)
+                if (!_memory.HasExited)
                 {
-                    try
-                    {
-                        patch.Dispose();
-                    }
-                    catch (Exception exception)
-                    {
-                        restorationError ??= exception;
-                    }
-                }
-
-                foreach ((string key, byte[] original) in _originalValues)
-                {
-                    if (Profile.Features.TryGetValue(key, out FeatureDefinition? feature))
-                    {
-                        try
-                        {
-                            _memory.WriteBytes(Resolve(feature.Address), original);
-                        }
-                        catch (Exception exception)
-                        {
-                            restorationError ??= exception;
-                        }
-                    }
+                    restorationError = RestoreActiveState();
                 }
             }
         }
@@ -231,6 +250,68 @@ public sealed class TrainerSession : IAsyncDisposable
         {
             throw new OnlineSessionException("偵測到線上會話，所有 Trainer 寫入已停用。");
         }
+    }
+
+    private void Locks_LockFailed(object? sender, ValueLockFailureEventArgs args)
+    {
+        Exception? restorationError;
+        lock (_stateGate)
+        {
+            if (_disposed || _safetyStopCause is not null)
+            {
+                return;
+            }
+
+            _safetyStopCause = args.Exception;
+            _locks.Clear();
+            restorationError = _memory.HasExited ? null : RestoreActiveState();
+        }
+
+        try
+        {
+            SafetyStopped?.Invoke(this, new TrainerSafetyStopEventArgs(args.Key, args.Exception, restorationError));
+        }
+        catch
+        {
+            // Safety restoration has already run; UI notification errors must not resume the session.
+        }
+    }
+
+    private Exception? RestoreActiveState()
+    {
+        Exception? restorationError = null;
+        foreach ((string key, MemoryPatchSet patch) in _patches.ToArray())
+        {
+            try
+            {
+                patch.Dispose();
+                _patches.Remove(key);
+            }
+            catch (Exception exception)
+            {
+                restorationError ??= exception;
+            }
+        }
+
+        foreach ((string key, byte[] original) in _originalValues.ToArray())
+        {
+            if (!Profile.Features.TryGetValue(key, out FeatureDefinition? feature))
+            {
+                continue;
+            }
+
+            try
+            {
+                _memory.WriteBytes(Resolve(feature.Address), original);
+                _originalValues.Remove(key);
+            }
+            catch (Exception exception)
+            {
+                restorationError ??= exception;
+            }
+        }
+
+        return restorationError;
     }
 
     private nint Resolve(AddressDefinition definition)
@@ -317,5 +398,24 @@ public sealed class TrainerSession : IAsyncDisposable
         return new MemoryPatch(_memory, Resolve(address), patch, expected);
     }
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+    private void ThrowIfUnavailable()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_safetyStopCause is not null)
+        {
+            throw new InvalidOperationException("Trainer 已因安全防護停止，必須重新附加。", _safetyStopCause);
+        }
+    }
+}
+
+public sealed class TrainerSafetyStopEventArgs(
+    string key,
+    Exception cause,
+    Exception? restorationError) : EventArgs
+{
+    public string Key { get; } = key;
+
+    public Exception Cause { get; } = cause;
+
+    public Exception? RestorationError { get; } = restorationError;
 }

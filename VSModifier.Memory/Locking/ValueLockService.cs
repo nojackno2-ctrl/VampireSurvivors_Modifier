@@ -8,10 +8,12 @@ public sealed class ValueLockService : IAsyncDisposable
     private readonly CancellationTokenSource _cancellation = new();
     private readonly Task _worker;
     private readonly TimeSpan _period;
+    private readonly bool _stopAllOnFailure;
 
-    public ValueLockService(TimeSpan? period = null)
+    public ValueLockService(TimeSpan? period = null, bool stopAllOnFailure = false)
     {
         _period = period ?? TimeSpan.FromMilliseconds(100);
+        _stopAllOnFailure = stopAllOnFailure;
         if (_period <= TimeSpan.Zero)
         {
             throw new ArgumentOutOfRangeException(nameof(period));
@@ -33,9 +35,9 @@ public sealed class ValueLockService : IAsyncDisposable
         {
             enforce();
         }
-        catch
+        catch (Exception exception)
         {
-            _locks.TryRemove(key, out _);
+            HandleFailure(key, exception);
             throw;
         }
     }
@@ -73,9 +75,34 @@ public sealed class ValueLockService : IAsyncDisposable
                 }
                 catch (Exception exception)
                 {
-                    _locks.TryRemove(key, out _);
-                    LockFailed?.Invoke(this, new ValueLockFailureEventArgs(key, exception));
+                    HandleFailure(key, exception);
                 }
+            }
+        }
+    }
+
+    private void HandleFailure(string key, Exception exception)
+    {
+        if (_stopAllOnFailure)
+        {
+            _locks.Clear();
+        }
+        else
+        {
+            _locks.TryRemove(key, out _);
+        }
+
+        ValueLockFailureEventArgs args = new(key, exception);
+        Delegate[] handlers = LockFailed?.GetInvocationList() ?? [];
+        foreach (EventHandler<ValueLockFailureEventArgs> handler in handlers.Cast<EventHandler<ValueLockFailureEventArgs>>())
+        {
+            try
+            {
+                handler(this, args);
+            }
+            catch
+            {
+                // A consumer notification must never restart writes or terminate the safety worker.
             }
         }
     }

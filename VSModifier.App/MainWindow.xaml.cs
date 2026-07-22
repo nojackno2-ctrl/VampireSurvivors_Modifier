@@ -726,10 +726,11 @@ public partial class MainWindow : Window
                 _gameInstallation.GameAssemblyPath,
                 _gameInstallation.UnityPlayerPath,
                 _gameInstallation.MetadataPath));
+            _trainerSession.SafetyStopped += TrainerSession_SafetyStopped;
             DetachTrainerButton.IsEnabled = true;
             TrainerControlsPanel.IsEnabled = true;
             UpdateTrainerFeatureAvailability();
-            TrainerStatusText.Text = "已附加；線上 guard 將在每次寫入前檢查。";
+            TrainerStatusText.Text = "已附加；線上 guard 每 100ms 持續監控，異常時會停止全部功能並還原。";
             TrainerStatusText.Foreground = Brushes.LightGreen;
         }
         catch (Exception exception)
@@ -753,6 +754,7 @@ public partial class MainWindow : Window
         ResetTrainerToggles();
         if (session is not null)
         {
+            session.SafetyStopped -= TrainerSession_SafetyStopped;
             try
             {
                 await session.DisposeAsync();
@@ -774,6 +776,30 @@ public partial class MainWindow : Window
         TrainerStatusText.Text = status;
         TrainerStatusText.Foreground = Brushes.LightGray;
         UpdateGameStatus();
+    }
+
+    private void TrainerSession_SafetyStopped(object? sender, TrainerSafetyStopEventArgs args)
+    {
+        if (sender is not TrainerSession session)
+        {
+            return;
+        }
+
+        _ = Dispatcher.InvokeAsync(() => _ = HandleTrainerSafetyStopAsync(session, args));
+    }
+
+    private async Task HandleTrainerSafetyStopAsync(TrainerSession session, TrainerSafetyStopEventArgs args)
+    {
+        if (!ReferenceEquals(_trainerSession, session))
+        {
+            return;
+        }
+
+        string status = args.RestorationError is null
+            ? $"安全防護已停止 Trainer 並還原全部功能：{args.Cause.Message}"
+            : $"安全防護已停止 Trainer，但還原時發生錯誤：{args.RestorationError.Message}";
+        await DetachTrainerAsync(status, showErrors: args.RestorationError is not null);
+        TrainerStatusText.Foreground = args.RestorationError is null ? Brushes.OrangeRed : Brushes.Red;
     }
 
     private async void MainWindow_Closed(object? sender, EventArgs e)

@@ -68,11 +68,12 @@ public sealed class MemoryPatchSet(IReadOnlyList<MemoryPatch> patches) : IDispos
             }
         }
 
-        _enabled = false;
         if (firstError is not null)
         {
             throw new InvalidOperationException("至少一段記憶體 patch 還原失敗。", firstError);
         }
+
+        _enabled = false;
     }
 
     public void Dispose() => Disable();
