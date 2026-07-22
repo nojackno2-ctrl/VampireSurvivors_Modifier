@@ -45,6 +45,12 @@ public sealed class MemoryPatch(
         }
 
         memory.WriteCodeBytes(address, _original);
+        byte[] verification = memory.ReadBytes(address, _original.Length);
+        if (!verification.AsSpan().SequenceEqual(_original))
+        {
+            throw new IOException("code patch 原始位元組還原後讀回驗證失敗。");
+        }
+
         IsEnabled = false;
     }
 

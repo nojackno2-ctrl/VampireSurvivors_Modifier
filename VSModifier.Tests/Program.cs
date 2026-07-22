@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -34,6 +35,16 @@ internal static class Program
             return RunTimeScaleReadOnlyInspection();
         }
 
+        if (args.Length > 0 && args[0].Equals("--verify-trainer-value", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunTrainerValueVerification(args);
+        }
+
+        if (args.Length > 0 && args[0].Equals("--verify-trainer-patch", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunTrainerPatchVerification(args);
+        }
+
         (string Name, Func<Task> Run)[] tests =
         [
             ("checksum calculation and application", TestChecksum),
@@ -50,6 +61,7 @@ internal static class Program
             ("reversible memory patch", TestMemoryPatch),
             ("atomic composite memory patch", TestMemoryPatchSet),
             ("offset catalog parsing", TestOffsetCatalog),
+            ("trainer verification policy", TestTrainerVerificationPolicy),
             ("value lock enforcement", TestValueLockService)
         ];
 
@@ -144,6 +156,73 @@ internal static class Program
         PrintNativeTarget("Time.get_timeScale", getter, unityPlayer);
         PrintNativeTarget("Time.set_timeScale", setter, unityPlayer);
         return getter != 0 && setter != 0 ? 0 : 1;
+    }
+
+    private static async Task<int> RunTrainerValueVerification(string[] args)
+    {
+        if (args.Length != 6
+            || !Enum.TryParse(args[3], ignoreCase: true, out VerificationValueMode mode)
+            || !Enum.IsDefined(mode)
+            || !double.TryParse(args[4], NumberStyles.Float, CultureInfo.InvariantCulture, out double value)
+            || !int.TryParse(args[5], NumberStyles.None, CultureInfo.InvariantCulture, out int durationMilliseconds))
+        {
+            Console.Error.WriteLine(
+                "Usage: --verify-trainer-value <profile-id> <feature-key> <set|multiply|add> <value> <duration-ms>");
+            return 2;
+        }
+
+        Console.WriteLine("DEV ONLY: 將只驗證一個功能，最長 5 秒；線上 guard 必須解析為 0，結束時會還原原始值。");
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        ValueVerificationResult result = await TrainerVerificationRunner.VerifyValueAsync(
+            catalog,
+            installation.GameAssemblyPath,
+            installation.UnityPlayerPath,
+            installation.MetadataPath,
+            args[1],
+            args[2],
+            mode,
+            value,
+            TimeSpan.FromMilliseconds(durationMilliseconds));
+        Console.WriteLine($"PASS  profile={result.ProfileId}; feature={result.FeatureKey}; durationMs={result.Duration.TotalMilliseconds:R}");
+        Console.WriteLine($"PASS  original={result.OriginalValue:R}; applied={result.AppliedValue:R}; restored={result.RestoredValue:R}");
+        return 0;
+    }
+
+    private static async Task<int> RunTrainerPatchVerification(string[] args)
+    {
+        if (args.Length != 4
+            || !int.TryParse(args[3], NumberStyles.None, CultureInfo.InvariantCulture, out int durationMilliseconds))
+        {
+            Console.Error.WriteLine("Usage: --verify-trainer-patch <profile-id> <feature-key> <duration-ms>");
+            return 2;
+        }
+
+        Console.WriteLine("DEV ONLY: 將只驗證一個 patch，最長 5 秒；線上 guard 必須解析為 0，結束時會還原原始位元組。");
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        PatchVerificationResult result = await TrainerVerificationRunner.VerifyPatchAsync(
+            catalog,
+            installation.GameAssemblyPath,
+            installation.UnityPlayerPath,
+            installation.MetadataPath,
+            args[1],
+            args[2],
+            TimeSpan.FromMilliseconds(durationMilliseconds));
+        Console.WriteLine($"PASS  profile={result.ProfileId}; feature={result.FeatureKey}; durationMs={result.Duration.TotalMilliseconds:R}");
+        Console.WriteLine($"PASS  appliedBytes={result.AppliedBytesMatched}; restoredBytes={result.RestoredBytesMatched}");
+        return 0;
+    }
+
+    private static GameInstallation GetCurrentGameInstallation()
+    {
+        return new GameInstallationLocator().FindInstallations().FirstOrDefault()
+            ?? throw new InvalidOperationException("找不到完整遊戲安裝。");
+    }
+
+    private static OffsetCatalog LoadOffsetCatalog()
+    {
+        return OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
     }
 
     private static nint ReadPointer(ProcessMemorySession memory, nint address)
@@ -565,6 +644,80 @@ internal static class Program
             Directory.Delete(directory, recursive: true);
         }
 
+        return Task.CompletedTask;
+    }
+
+    private static Task TestTrainerVerificationPolicy()
+    {
+        AddressDefinition online = new()
+        {
+            Module = "GameAssembly.dll",
+            BaseOffset = 16
+        };
+        FeatureDefinition valueFeature = new()
+        {
+            Kind = FeatureKind.Value,
+            ValueType = MemoryValueType.Float,
+            Address = new AddressDefinition
+            {
+                Module = "GameAssembly.dll",
+                BaseOffset = 32
+            }
+        };
+        GameVersionProfile unverified = new()
+        {
+            ProfileId = "test-profile",
+            GameAssemblySha256 = new string('a', 64),
+            UnityPlayerSha256 = new string('b', 64),
+            Il2CppMetadataSha256 = new string('c', 64),
+            Verified = false,
+            OnlineSession = online,
+            Features = new Dictionary<string, FeatureDefinition>(StringComparer.Ordinal)
+            {
+                ["test.value"] = valueFeature
+            }
+        };
+
+        Throws<InvalidOperationException>(() => TrainerProfilePolicy.RequireReleaseReady(unverified));
+        Equal(
+            valueFeature,
+            TrainerProfilePolicy.RequireDevelopmentVerification(
+                unverified,
+                "test-profile",
+                "test.value",
+                FeatureKind.Value,
+                TimeSpan.FromSeconds(1)),
+            "Development verification must return the exact selected feature.");
+        Throws<InvalidOperationException>(() => TrainerProfilePolicy.RequireDevelopmentVerification(
+            unverified,
+            "wrong-profile",
+            "test.value",
+            FeatureKind.Value,
+            TimeSpan.FromSeconds(1)));
+        Throws<InvalidOperationException>(() => TrainerProfilePolicy.RequireDevelopmentVerification(
+            unverified,
+            "test-profile",
+            "test.value",
+            FeatureKind.Patch,
+            TimeSpan.FromSeconds(1)));
+        Throws<ArgumentOutOfRangeException>(() => TrainerProfilePolicy.RequireDevelopmentVerification(
+            unverified,
+            "test-profile",
+            "test.value",
+            FeatureKind.Value,
+            TimeSpan.FromSeconds(6)));
+
+        GameVersionProfile verified = new()
+        {
+            ProfileId = unverified.ProfileId,
+            GameAssemblySha256 = unverified.GameAssemblySha256,
+            UnityPlayerSha256 = unverified.UnityPlayerSha256,
+            Il2CppMetadataSha256 = unverified.Il2CppMetadataSha256,
+            Verified = true,
+            OnlineSession = online,
+            Features = unverified.Features
+        };
+        TrainerProfilePolicy.RequireReleaseReady(verified);
         return Task.CompletedTask;
     }
 

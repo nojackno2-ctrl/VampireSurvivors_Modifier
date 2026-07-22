@@ -49,6 +49,23 @@ dotnet run --project VSModifier.IdExtractor -- <dump.cs> steam-current-2026-07-2
 
 工具會把角色、武器、關卡、Arcana、成就等事實性 ID 寫入指定 `profileId`，並保留其他版本資料。一鍵全解鎖只會在三檔指紋命中同一個遊戲 Profile 時使用對應 ID 表，而且採安全合併：保留既有順序、重複等級與未收錄 ID，只追加缺少項目。PowerUp 陣列以重複 ID 表示等級，抽取工具刻意不產生這兩欄；皮膚的 `UnlockedSkins`／`UnlockedSkinsV2` 是 dictionary，不會誤當陣列覆寫，可由進階 JSON 編輯器處理。Trainer 偏移仍須另行分析並逐項實機驗證；完成後新增一筆帶有三檔雜湊的 Profile，不能只替換舊版本的雜湊。
 
+### Trainer 開發驗證工具
+
+未驗證 Profile 永遠不能由正式 WPF 附加。偏移維護者必須先進入單人關卡，執行唯讀診斷並確認 `onlineSession` 成功解析且值為 `0`：
+
+```powershell
+dotnet run --project VSModifier.Tests -- --inspect-trainer-read-only
+```
+
+只有在上述條件成立後，才可使用下列開發專用命令逐項驗證。每次必須明確輸入目前三檔指紋命中的 `profile-id`，只允許一個功能，持續時間限制為 100–5000ms；工具全程每 100ms 檢查線上 guard，並在 `finally`／工作階段釋放時還原及讀回驗證原始值或原始程式碼位元組。這些命令不會出現在正式 WPF：
+
+```powershell
+dotnet run --project VSModifier.Tests -- --verify-trainer-value <profile-id> <feature-key> <set|multiply|add> <value> <duration-ms>
+dotnet run --project VSModifier.Tests -- --verify-trainer-patch <profile-id> <feature-key> <duration-ms>
+```
+
+實際遊戲效果仍須由測試者觀察並記錄；單純寫入與還原成功不能自動把 Profile 改成 `verified: true`。最高寶箱 patch 必須另以實際開箱及遊戲 log 證明。
+
 ## 版權與隱私
 
 本專案不包含 poncle 的遊戲檔案、metadata、Il2CppDumper 完整輸出、遊戲素材或個人 SaveData，亦與 poncle 無關。
