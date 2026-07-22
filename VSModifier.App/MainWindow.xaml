@@ -188,7 +188,8 @@
                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                              FontFamily="Cascadia Mono, Consolas" />
                     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                        <Button Content="去除重複並套用" Click="ApplyUnlocksButton_Click" />
+                        <Button Content="一鍵套用版本解鎖表…" Click="UnlockAllButton_Click" Background="#9A3412" />
+                        <Button Content="套用 ID 清單" Click="ApplyUnlocksButton_Click" />
                     </StackPanel>
                 </Grid>
             </TabItem>
@@ -273,12 +274,75 @@
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="22">
                         <TextBlock Text="外部記憶體 Trainer" FontSize="24" FontWeight="SemiBold" />
-                        <Border Margin="0,16" Padding="16" Background="#3F2A17" BorderBrush="#B7791F" BorderThickness="1">
+                        <GroupBox Header="版本與連線狀態">
+                            <Grid Margin="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="160" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Text="遊戲安裝" Foreground="#94A3B8" Margin="0,5" />
+                                <TextBlock x:Name="TrainerGamePathText" Grid.Column="1" Margin="0,5" TextWrapping="Wrap" />
+                                <TextBlock Grid.Row="1" Text="版本 Profile" Foreground="#94A3B8" Margin="0,5" />
+                                <TextBlock x:Name="TrainerVersionText" Grid.Row="1" Grid.Column="1" Margin="0,5" TextWrapping="Wrap" />
+                                <TextBlock Grid.Row="2" Text="Trainer 狀態" Foreground="#94A3B8" Margin="0,5" />
+                                <TextBlock x:Name="TrainerStatusText" Grid.Row="2" Grid.Column="1" Margin="0,5" TextWrapping="Wrap" />
+                                <StackPanel Grid.Column="2" Grid.RowSpan="3" Orientation="Vertical" VerticalAlignment="Center">
+                                    <Button x:Name="AttachTrainerButton" Content="附加遊戲" Click="AttachTrainerButton_Click" IsEnabled="False" />
+                                    <Button x:Name="DetachTrainerButton" Content="中斷並還原" Click="DetachTrainerButton_Click" IsEnabled="False" />
+                                </StackPanel>
+                            </Grid>
+                        </GroupBox>
+                        <Border Margin="8" Padding="14" Background="#3F2A17" BorderBrush="#B7791F" BorderThickness="1">
                             <TextBlock TextWrapping="Wrap" Foreground="#FDE68A"
-                                       Text="Trainer 基礎設施與版本偏移尚在建置。未驗證的記憶體功能不會提供可點擊開關，避免錯誤偏移造成遊戲崩潰。" />
+                                       Text="僅限單機／本地遊玩。缺少已驗證版本、功能偏移或線上會話防護時，程式會拒絕附加。遊戲關閉或中斷 Trainer 時會嘗試還原所有原始值。" />
                         </Border>
-                        <TextBlock TextWrapping="Wrap" Foreground="#CBD5E1"
-                                   Text="預定功能：無敵、傷害倍率、遊戲速度、最高寶箱獎勵、即時快速開箱，以及 PlayerModifierStats 全套屬性控制。只允許單機／本地遊玩，偵測線上會話時會自動停用。" />
+                        <StackPanel x:Name="TrainerControlsPanel" IsEnabled="False">
+                            <GroupBox Header="主要功能">
+                                <StackPanel>
+                                    <CheckBox x:Name="InvulnerabilityCheckBox" Content="無敵（永久 invulnerability）"
+                                              Tag="invulnerability" Click="TrainerDirectValueCheckBox_Click" />
+                                    <CheckBox x:Name="QuickTreasureRuntimeCheckBox" Content="即時快速寶箱動畫"
+                                              Tag="quickTreasure" Click="TrainerDirectValueCheckBox_Click" />
+                                    <CheckBox x:Name="MaxTreasureCheckBox" Content="寶箱強制最高獎勵（code patch）"
+                                              Tag="maxTreasure" Click="TrainerPatchCheckBox_Click" />
+                                    <Grid Margin="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="220" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox x:Name="DamageMultiplierCheckBox" Content="傷害倍率" Tag="damageMultiplier"
+                                                  Click="TrainerMultiplierCheckBox_Click" />
+                                        <TextBox x:Name="DamageMultiplierTextBox" Grid.Column="1" Text="10" />
+                                        <TextBlock Grid.Column="2" Text="× 原始值" Foreground="#94A3B8" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid Margin="8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="220" />
+                                            <ColumnDefinition Width="120" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox x:Name="GameSpeedCheckBox" Content="遊戲速率" Tag="gameSpeed"
+                                                  Click="TrainerMultiplierCheckBox_Click" />
+                                        <TextBox x:Name="GameSpeedTextBox" Grid.Column="1" Text="2" />
+                                        <TextBlock Grid.Column="2" Text="× 原始值；暫停值 0 不覆寫" Foreground="#94A3B8" VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </GroupBox>
+                            <GroupBox Header="PlayerModifierStats 倍率">
+                                <StackPanel>
+                                    <TextBlock Text="勾選後以 100ms 間隔維持調整值；倍率項使用原始值 × 輸入值，標示「+」者使用原始值 + 輸入值。取消勾選會還原原始值。"
+                                               Foreground="#94A3B8" TextWrapping="Wrap" Margin="8" />
+                                    <UniformGrid x:Name="TrainerAttributePanel" Columns="2" />
+                                </StackPanel>
+                            </GroupBox>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

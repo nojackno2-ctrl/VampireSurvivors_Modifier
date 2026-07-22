@@ -12,13 +12,16 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
     private readonly SafeProcessHandle _handle;
     private bool _disposed;
 
-    private ProcessMemorySession(Process process, SafeProcessHandle handle)
+    private ProcessMemorySession(Process process, SafeProcessHandle handle, bool canWrite)
     {
         _process = process;
         _handle = handle;
+        CanWrite = canWrite;
     }
 
     public int ProcessId => _process.Id;
+
+    public bool CanWrite { get; }
 
     public bool HasExited
     {
@@ -30,6 +33,16 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
     }
 
     public static ProcessMemorySession Attach(string processName = "VampireSurvivors")
+    {
+        return AttachCore(processName, canWrite: true);
+    }
+
+    public static ProcessMemorySession AttachReadOnly(string processName = "VampireSurvivors")
+    {
+        return AttachCore(processName, canWrite: false);
+    }
+
+    private static ProcessMemorySession AttachCore(string processName, bool canWrite)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -52,9 +65,8 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
         {
             SafeProcessHandle handle = NativeMethods.OpenProcess(
                 ProcessAccess.QueryInformation
-                    | ProcessAccess.VirtualMemoryOperation
                     | ProcessAccess.VirtualMemoryRead
-                    | ProcessAccess.VirtualMemoryWrite,
+                    | (canWrite ? ProcessAccess.VirtualMemoryOperation | ProcessAccess.VirtualMemoryWrite : 0),
                 inheritHandle: false,
                 selected.Id);
             if (handle.IsInvalid)
@@ -62,7 +74,7 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "無法開啟遊戲行程；請確認權限與行程狀態。");
             }
 
-            return new ProcessMemorySession(selected, handle);
+            return new ProcessMemorySession(selected, handle, canWrite);
         }
         catch
         {
@@ -115,12 +127,14 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
     public void WriteBytes(nint address, ReadOnlySpan<byte> bytes)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureWritable();
         WriteCore(address, bytes);
     }
 
     public void WriteCodeBytes(nint address, ReadOnlySpan<byte> bytes)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        EnsureWritable();
         if (!NativeMethods.VirtualProtectEx(_handle, address, (nuint)bytes.Length, MemoryProtection.ExecuteReadWrite, out uint oldProtection))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "無法變更程式碼頁保護屬性。");
@@ -169,6 +183,14 @@ public sealed class ProcessMemorySession : IProtectedMemoryAccessor, IDisposable
             || bytesWritten != (nuint)buffer.Length)
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), $"寫入位址 0x{address:X} 失敗。");
+        }
+    }
+
+    private void EnsureWritable()
+    {
+        if (!CanWrite)
+        {
+            throw new InvalidOperationException("此行程工作階段為唯讀，禁止寫入。");
         }
     }
 }

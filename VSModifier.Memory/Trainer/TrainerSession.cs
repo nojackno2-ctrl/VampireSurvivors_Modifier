@@ -93,6 +93,31 @@ public sealed class TrainerSession : IAsyncDisposable
         });
     }
 
+    public void EnableAdditiveLock(string featureKey, double amount)
+    {
+        ThrowIfDisposed();
+        if (!double.IsFinite(amount))
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount));
+        }
+
+        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+        nint address = Resolve(feature.Address);
+        int size = GetValueSize(feature.ValueType);
+        if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+        {
+            original = _memory.ReadBytes(address, size);
+            _originalValues.Add(featureKey, original);
+        }
+
+        byte[] desired = EncodeValue(feature.ValueType, DecodeValue(feature.ValueType, original) + amount);
+        _locks.Set(featureKey, () =>
+        {
+            EnsureOffline();
+            _memory.WriteBytes(address, desired);
+        });
+    }
+
     public void DisableValueLock(string featureKey, bool restoreOriginal = true)
     {
         ThrowIfDisposed();
@@ -200,8 +225,7 @@ public sealed class TrainerSession : IAsyncDisposable
 
     private nint Resolve(AddressDefinition definition)
     {
-        nint moduleBase = _memory.GetModuleBaseAddress(definition.Module);
-        return PointerChain.Resolve(_memory, moduleBase + checked((nint)definition.BaseOffset), definition.PointerOffsets);
+        return ProfileAddressResolver.Resolve(_memory, definition);
     }
 
     private FeatureDefinition GetFeature(string featureKey, FeatureKind kind)

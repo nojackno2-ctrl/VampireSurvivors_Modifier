@@ -7,6 +7,7 @@
 
   <ItemGroup>
     <None Include="..\data\offsets.json" Link="data\offsets.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\data\ids\unlocks.json" Link="data\ids\unlocks.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <PropertyGroup>

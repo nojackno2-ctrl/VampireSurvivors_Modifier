@@ -9,7 +9,10 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using VSModifier.Core.Game;
 using VSModifier.Core.Saves;
+using VSModifier.Memory.Profiles;
+using VSModifier.Memory.Trainer;
 
 namespace VSModifier.App;
 
@@ -20,15 +23,27 @@ public partial class MainWindow : Window
     private readonly SaveFileService _saveFileService;
     private readonly SavePathLocator _savePathLocator = new();
     private readonly DispatcherTimer _statusTimer;
+    private readonly Dictionary<string, (CheckBox Toggle, TextBox Value)> _trainerAttributeControls = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _additiveTrainerFeatures = new(StringComparer.Ordinal)
+    {
+        "stat.amount", "stat.armor", "stat.revivals", "stat.rerolls", "stat.skips", "stat.banish", "stat.charm"
+    };
     private SaveDocument? _document;
     private string? _lastBackupPath;
+    private GameInstallation? _gameInstallation;
+    private OffsetCatalog? _offsetCatalog;
+    private GameVersionProfile? _gameProfile;
+    private TrainerSession? _trainerSession;
+    private bool _updatingTrainerUi;
 
     public MainWindow()
     {
         InitializeComponent();
         _saveFileService = new SaveFileService(_processDetector);
         _statusTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, StatusTimer_Tick, Dispatcher);
+        CreateTrainerAttributeControls();
         Loaded += MainWindow_Loaded;
+        Closed += MainWindow_Closed;
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -46,11 +61,19 @@ public partial class MainWindow : Window
             SetStatus("找不到存檔，請按「瀏覽」選擇 SaveData。", isError: true);
         }
 
+        await InitializeTrainerAsync();
         UpdateGameStatus();
         _statusTimer.Start();
     }
 
-    private void StatusTimer_Tick(object? sender, EventArgs e) => UpdateGameStatus();
+    private async void StatusTimer_Tick(object? sender, EventArgs e)
+    {
+        UpdateGameStatus();
+        if (_trainerSession is not null && !_trainerSession.IsAttached)
+        {
+            await DetachTrainerAsync("遊戲行程已結束；Trainer 已中斷。", showErrors: false);
+        }
+    }
 
     private void UpdateGameStatus()
     {
@@ -58,6 +81,9 @@ public partial class MainWindow : Window
         GameStatusLight.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#EF4444" : "#22C55E"));
         GameStatusLight.ToolTip = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
         SaveButton.IsEnabled = _document is not null && !running;
+        AttachTrainerButton.IsEnabled = running
+            && _trainerSession is null
+            && _gameProfile is { Verified: true, OnlineSession: not null };
     }
 
     private async void DetectSaveButton_Click(object sender, RoutedEventArgs e)
@@ -231,15 +257,37 @@ public partial class MainWindow : Window
         string[] ids = UnlockIdsTextBox.Text
             .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Where(id => !string.IsNullOrWhiteSpace(id))
-            .Distinct(StringComparer.Ordinal)
             .ToArray();
-        new SaveEditor(_document).UnlockAll(new Dictionary<string, IReadOnlyCollection<string>>
-        {
-            [propertyName] = ids
-        });
+        JsonNode?[] values = string.Equals(propertyName, "UnlockedArcanas", StringComparison.Ordinal)
+            ? ids.Select(id => JsonValue.Create(ParseInt(id, "Arcana ID")) as JsonNode).ToArray()
+            : ids.Select(id => JsonValue.Create(id) as JsonNode).ToArray();
+        new SaveEditor(_document).ReplaceArray(propertyName, values);
         RefreshUnlockEditor();
         RefreshJsonEditor();
         SetStatus($"{propertyName} 已套用 {ids.Length} 個 ID，尚未寫入磁碟。", false);
+    }
+
+    private void UnlockAllButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_document is null
+            || MessageBox.Show(this, "將以目前版本的 data/ids/unlocks.json 取代各解鎖陣列。這可能影響成就與 CheatCodeUsed。是否繼續？", "一鍵全解鎖", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "data", "ids", "unlocks.json");
+            JsonObject catalog = JsonNode.Parse(File.ReadAllText(path)) as JsonObject
+                ?? throw new InvalidDataException("unlocks.json 根節點必須是 object。");
+            new SaveEditor(_document).ApplyUnlockCatalog(catalog);
+            RefreshAllFields();
+            SetStatus($"已套用 {catalog.Count} 組版本解鎖資料，尚未寫入磁碟。", false);
+        }
+        catch (Exception exception)
+        {
+            ShowError("無法套用版本解鎖表", exception);
+        }
     }
 
     private void ApplyEggButton_Click(object sender, RoutedEventArgs e)
@@ -346,7 +394,7 @@ public partial class MainWindow : Window
         JsonArray? array = _document.Root[propertyName] as JsonArray;
         UnlockIdsTextBox.Text = array is null
             ? string.Empty
-            : string.Join(Environment.NewLine, array.Select(node => node?.GetValue<string>()).Where(value => value is not null));
+            : string.Join(Environment.NewLine, array.Select(node => node?.ToString()).Where(value => value is not null));
     }
 
     private void RefreshJsonEditor()
@@ -436,5 +484,294 @@ public partial class MainWindow : Window
     {
         SetStatus($"{title}：{exception.Message}", true);
         MessageBox.Show(this, exception.Message, title, MessageBoxButton.OK, MessageBoxImage.Error);
+    }
+
+    private async Task InitializeTrainerAsync()
+    {
+        try
+        {
+            TrainerStatusText.Text = "正在辨識遊戲版本…";
+            _gameInstallation = new GameInstallationLocator().FindInstallations().FirstOrDefault();
+            if (_gameInstallation is null)
+            {
+                TrainerGamePathText.Text = "找不到完整遊戲安裝";
+                TrainerVersionText.Text = "無";
+                TrainerStatusText.Text = "Trainer 不可用。";
+                return;
+            }
+
+            TrainerGamePathText.Text = _gameInstallation.RootPath;
+            string offsetsPath = Path.Combine(AppContext.BaseDirectory, "data", "offsets.json");
+            _offsetCatalog = OffsetCatalog.Load(offsetsPath);
+            string fingerprint = await Task.Run(() => GameAssemblyFingerprint.CalculateSha256(_gameInstallation.GameAssemblyPath));
+            _gameProfile = _offsetCatalog.FindByHash(fingerprint);
+            if (_gameProfile is null)
+            {
+                TrainerVersionText.Text = $"未知版本（{fingerprint[..12]}…）";
+                TrainerStatusText.Text = "offsets.json 沒有此版本，已拒絕附加。";
+                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                return;
+            }
+
+            TrainerVersionText.Text = $"{_gameProfile.Label}（{fingerprint[..12]}…）";
+            if (!_gameProfile.Verified)
+            {
+                TrainerStatusText.Text = "版本已辨識，但偏移尚未實機驗證；已拒絕附加。";
+                TrainerStatusText.Foreground = Brushes.Orange;
+                return;
+            }
+
+            if (_gameProfile.OnlineSession is null)
+            {
+                TrainerStatusText.Text = "缺少線上會話防護偏移；已拒絕附加。";
+                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                return;
+            }
+
+            TrainerStatusText.Text = "版本與線上防護已驗證；啟動遊戲後可附加。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            TrainerVersionText.Text = "無法辨識";
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+        finally
+        {
+            UpdateGameStatus();
+        }
+    }
+
+    private async void AttachTrainerButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_offsetCatalog is null || _gameInstallation is null)
+        {
+            return;
+        }
+
+        try
+        {
+            AttachTrainerButton.IsEnabled = false;
+            TrainerStatusText.Text = "正在安全附加…";
+            _trainerSession = await Task.Run(() => TrainerSession.Attach(_offsetCatalog, _gameInstallation.GameAssemblyPath));
+            DetachTrainerButton.IsEnabled = true;
+            TrainerControlsPanel.IsEnabled = true;
+            UpdateTrainerFeatureAvailability();
+            TrainerStatusText.Text = "已附加；線上 guard 將在每次寫入前檢查。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private async void DetachTrainerButton_Click(object sender, RoutedEventArgs e)
+    {
+        await DetachTrainerAsync("已中斷 Trainer 並還原原始值。", showErrors: true);
+    }
+
+    private async Task DetachTrainerAsync(string status, bool showErrors)
+    {
+        TrainerSession? session = _trainerSession;
+        _trainerSession = null;
+        TrainerControlsPanel.IsEnabled = false;
+        DetachTrainerButton.IsEnabled = false;
+        ResetTrainerToggles();
+        if (session is not null)
+        {
+            try
+            {
+                await session.DisposeAsync();
+            }
+            catch (Exception exception)
+            {
+                TrainerStatusText.Text = exception.Message;
+                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                if (showErrors)
+                {
+                    MessageBox.Show(this, exception.Message, "Trainer 還原失敗", MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+
+                UpdateGameStatus();
+                return;
+            }
+        }
+
+        TrainerStatusText.Text = status;
+        TrainerStatusText.Foreground = Brushes.LightGray;
+        UpdateGameStatus();
+    }
+
+    private async void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        _statusTimer.Stop();
+        if (_trainerSession is not null)
+        {
+            await DetachTrainerAsync("Trainer 已關閉。", showErrors: false);
+        }
+    }
+
+    private void TrainerDirectValueCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatingTrainerUi || sender is not CheckBox toggle || toggle.Tag is not string key || _trainerSession is null)
+        {
+            return;
+        }
+
+        ApplyTrainerAction(toggle, () =>
+        {
+            if (toggle.IsChecked == true)
+            {
+                _trainerSession.EnableValueLock(key, 1);
+            }
+            else
+            {
+                _trainerSession.DisableValueLock(key);
+            }
+        });
+    }
+
+    private void TrainerPatchCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatingTrainerUi || sender is not CheckBox toggle || toggle.Tag is not string key || _trainerSession is null)
+        {
+            return;
+        }
+
+        ApplyTrainerAction(toggle, () =>
+        {
+            if (toggle.IsChecked == true)
+            {
+                _trainerSession.EnablePatch(key);
+            }
+            else
+            {
+                _trainerSession.DisablePatch(key);
+            }
+        });
+    }
+
+    private void TrainerMultiplierCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatingTrainerUi || sender is not CheckBox toggle || toggle.Tag is not string key || _trainerSession is null)
+        {
+            return;
+        }
+
+        TextBox valueBox = key switch
+        {
+            "damageMultiplier" => DamageMultiplierTextBox,
+            "gameSpeed" => GameSpeedTextBox,
+            _ when _trainerAttributeControls.TryGetValue(key, out var control) => control.Value,
+            _ => throw new InvalidOperationException($"找不到 {key} 的倍率欄位。")
+        };
+        ApplyTrainerAction(toggle, () =>
+        {
+            if (toggle.IsChecked == true)
+            {
+                double adjustment = ParseDouble(valueBox.Text, _additiveTrainerFeatures.Contains(key) ? "增加量" : "倍率");
+                if (_additiveTrainerFeatures.Contains(key))
+                {
+                    _trainerSession.EnableAdditiveLock(key, adjustment);
+                }
+                else
+                {
+                    _trainerSession.EnableMultiplierLock(key, adjustment);
+                }
+            }
+            else
+            {
+                _trainerSession.DisableValueLock(key);
+            }
+        });
+    }
+
+    private void ApplyTrainerAction(CheckBox toggle, Action action)
+    {
+        try
+        {
+            action();
+            TrainerStatusText.Text = $"{toggle.Content}：{(toggle.IsChecked == true ? "已啟用" : "已還原")}。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            _updatingTrainerUi = true;
+            toggle.IsChecked = false;
+            _updatingTrainerUi = false;
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private void CreateTrainerAttributeControls()
+    {
+        (string Key, string Label, string DefaultValue)[] definitions =
+        [
+            ("growth", "經驗倍率", "5"), ("greed", "金幣倍率", "5"),
+            ("luck", "運氣", "5"), ("cooldown", "冷卻倍率", "0.1"),
+            ("moveSpeed", "移動速度", "2"), ("area", "攻擊範圍", "3"),
+            ("amount", "投射物數量 +", "5"), ("duration", "持續時間", "3"),
+            ("speed", "彈速", "2"), ("armor", "護甲 +", "999"),
+            ("regen", "回血", "5"), ("magnet", "磁吸範圍", "5"),
+            ("revivals", "復活次數 +", "99"), ("rerolls", "Reroll +", "99"),
+            ("skips", "Skip +", "99"), ("banish", "Banish +", "99"),
+            ("curse", "詛咒／敵人密度", "2"), ("charm", "魅惑 +", "10"),
+            ("defang", "拔牙", "2")
+        ];
+
+        foreach ((string key, string label, string defaultValue) in definitions)
+        {
+            string featureKey = $"stat.{key}";
+            Grid row = new() { Margin = new Thickness(6) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(90) });
+            CheckBox toggle = new() { Content = label, Tag = featureKey, VerticalAlignment = VerticalAlignment.Center };
+            toggle.Click += TrainerMultiplierCheckBox_Click;
+            TextBox value = new() { Text = defaultValue, ToolTip = "倍率" };
+            Grid.SetColumn(value, 1);
+            row.Children.Add(toggle);
+            row.Children.Add(value);
+            TrainerAttributePanel.Children.Add(row);
+            _trainerAttributeControls.Add(featureKey, (toggle, value));
+        }
+    }
+
+    private void UpdateTrainerFeatureAvailability()
+    {
+        if (_trainerSession is null)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<string, FeatureDefinition> features = _trainerSession.Profile.Features;
+        InvulnerabilityCheckBox.IsEnabled = features.ContainsKey("invulnerability");
+        QuickTreasureRuntimeCheckBox.IsEnabled = features.ContainsKey("quickTreasure");
+        MaxTreasureCheckBox.IsEnabled = features.ContainsKey("maxTreasure");
+        DamageMultiplierCheckBox.IsEnabled = features.ContainsKey("damageMultiplier");
+        GameSpeedCheckBox.IsEnabled = features.ContainsKey("gameSpeed");
+        foreach ((string key, (CheckBox toggle, _)) in _trainerAttributeControls)
+        {
+            toggle.IsEnabled = features.ContainsKey(key);
+        }
+    }
+
+    private void ResetTrainerToggles()
+    {
+        _updatingTrainerUi = true;
+        InvulnerabilityCheckBox.IsChecked = false;
+        QuickTreasureRuntimeCheckBox.IsChecked = false;
+        MaxTreasureCheckBox.IsChecked = false;
+        DamageMultiplierCheckBox.IsChecked = false;
+        GameSpeedCheckBox.IsChecked = false;
+        foreach ((_, (CheckBox toggle, _)) in _trainerAttributeControls)
+        {
+            toggle.IsChecked = false;
+        }
+
+        _updatingTrainerUi = false;
     }
 }
