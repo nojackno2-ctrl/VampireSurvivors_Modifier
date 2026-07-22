@@ -71,6 +71,11 @@ public sealed class OffsetCatalog
     {
         foreach (GameVersionProfile profile in Profiles)
         {
+            if (string.IsNullOrWhiteSpace(profile.ProfileId))
+            {
+                throw new InvalidDataException("offsets.json Profile 缺少 profileId。");
+            }
+
             if (!IsSha256(profile.GameAssemblySha256)
                 || !IsSha256(profile.UnityPlayerSha256)
                 || !IsSha256(profile.Il2CppMetadataSha256))
@@ -93,6 +98,11 @@ public sealed class OffsetCatalog
         {
             throw new InvalidDataException("offsets.json 包含重複的 GameAssembly／UnityPlayer／metadata 版本組合。");
         }
+
+        if (Profiles.GroupBy(profile => profile.ProfileId, StringComparer.Ordinal).Any(group => group.Count() > 1))
+        {
+            throw new InvalidDataException("offsets.json 包含重複的 profileId。");
+        }
     }
 
     private static bool IsSha256(string? value)
@@ -105,6 +115,8 @@ public sealed record ProfileMatchResult(GameVersionProfile? Profile, string? Err
 
 public sealed class GameVersionProfile
 {
+    public required string ProfileId { get; init; }
+
     public required string GameAssemblySha256 { get; init; }
 
     public required string UnityPlayerSha256 { get; init; }

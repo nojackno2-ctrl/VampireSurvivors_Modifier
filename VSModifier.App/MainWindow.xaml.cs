@@ -288,7 +288,7 @@ public partial class MainWindow : Window
     private void UnlockAllButton_Click(object sender, RoutedEventArgs e)
     {
         if (_document is null
-            || MessageBox.Show(this, "將以目前版本的 data/ids/unlocks.json 取代各解鎖陣列。這可能影響成就與 CheatCodeUsed。是否繼續？", "一鍵全解鎖", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            || MessageBox.Show(this, "將安全合併目前遊戲版本的解鎖 ID，保留既有順序、重複等級與未收錄內容。這可能影響成就與 CheatCodeUsed。是否繼續？", "一鍵全解鎖", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
             return;
         }
@@ -296,11 +296,14 @@ public partial class MainWindow : Window
         try
         {
             string path = Path.Combine(AppContext.BaseDirectory, "data", "ids", "unlocks.json");
-            JsonObject catalog = JsonNode.Parse(File.ReadAllText(path)) as JsonObject
-                ?? throw new InvalidDataException("unlocks.json 根節點必須是 object。");
-            new SaveEditor(_document).ApplyUnlockCatalog(catalog);
+            GameVersionProfile gameProfile = _gameProfile
+                ?? throw new InvalidOperationException("目前安裝的遊戲版本尚未辨識，已拒絕套用版本解鎖表；仍可手動編輯個別陣列。");
+            UnlockCatalog catalog = UnlockCatalog.Load(path);
+            UnlockCatalogProfile unlockProfile = catalog.FindByProfileId(gameProfile.ProfileId)
+                ?? throw new InvalidOperationException($"unlocks.json 沒有版本 Profile {gameProfile.ProfileId} 的資料。");
+            new SaveEditor(_document).MergeUnlockCatalog(unlockProfile.Arrays);
             RefreshAllFields();
-            SetStatus($"已套用 {catalog.Count} 組版本解鎖資料，尚未寫入磁碟。", false);
+            SetStatus($"已安全合併 {unlockProfile.Arrays.Count} 組版本解鎖資料，尚未寫入磁碟。", false);
         }
         catch (Exception exception)
         {
@@ -317,20 +320,26 @@ public partial class MainWindow : Window
 
         try
         {
-            string attribute = SelectedComboText(EggAttributeComboBox)
+            string attribute = SelectedComboKey(EggAttributeComboBox)
                 ?? throw new InvalidOperationException("請選擇蛋屬性。");
             editor.SetEggAttribute(
                 EggCharacterTextBox.Text.Trim(),
                 attribute,
                 ParseDouble(EggValueTextBox.Text, "蛋數"));
+            RefreshEggCurrentValue();
             RefreshJsonEditor();
-            SetStatus("蛋屬性與 total 已套用，尚未寫入磁碟。", false);
+            string label = SelectedComboText(EggAttributeComboBox) ?? attribute;
+            SetStatus($"只修改 {label}，其他金蛋屬性未變；total 已重算，尚未寫入磁碟。", false);
         }
         catch (Exception exception)
         {
             ShowError("無法套用蛋屬性", exception);
         }
     }
+
+    private void EggCharacterTextBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshEggCurrentValue();
+
+    private void EggAttributeComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e) => RefreshEggCurrentValue();
 
     private void ApplyFlagsButton_Click(object sender, RoutedEventArgs e)
     {
@@ -430,6 +439,8 @@ public partial class MainWindow : Window
         FinalBossCheckBox.IsChecked = ReadFlag("HasKilledTheFinalBoss");
         SequentialChestCheckBox.IsChecked = ReadFlag("SequentialChestMode");
         RefreshUnlockEditor();
+        RefreshEggAttributeOptions();
+        RefreshEggCurrentValue();
         RefreshJsonEditor();
         BackupPathText.Text = _lastBackupPath ?? "尚未由本程式建立備份";
     }
@@ -445,6 +456,52 @@ public partial class MainWindow : Window
         UnlockIdsTextBox.Text = array is null
             ? string.Empty
             : string.Join(Environment.NewLine, array.Select(node => node?.ToString()).Where(value => value is not null));
+    }
+
+    private void RefreshEggCurrentValue()
+    {
+        if (_document is null || EggCurrentValueText is null || EggAttributeComboBox is null)
+        {
+            return;
+        }
+
+        string? attribute = SelectedComboKey(EggAttributeComboBox);
+        if (attribute is null || string.IsNullOrWhiteSpace(EggCharacterTextBox.Text))
+        {
+            EggCurrentValueText.Text = "請輸入角色 ID 並選擇屬性";
+            return;
+        }
+
+        SaveEditor editor = new(_document);
+        EggCurrentValueText.Text = editor.TryGetEggAttribute(EggCharacterTextBox.Text, attribute, out double value)
+            ? value.ToString("R", CultureInfo.InvariantCulture)
+            : "此角色尚無該屬性資料（目前視為 0）";
+    }
+
+    private void RefreshEggAttributeOptions()
+    {
+        if (_document is null || EggAttributeComboBox is null)
+        {
+            return;
+        }
+
+        HashSet<string> existing = EggAttributeComboBox.Items
+            .OfType<ComboBoxItem>()
+            .Select(item => item.Tag?.ToString())
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .Select(key => key!)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string attribute in new SaveEditor(_document).GetEggAttributeNames())
+        {
+            if (existing.Add(attribute))
+            {
+                EggAttributeComboBox.Items.Add(new ComboBoxItem
+                {
+                    Content = $"{attribute}（此版本額外屬性）",
+                    Tag = attribute
+                });
+            }
+        }
     }
 
     private void RefreshJsonEditor()
@@ -530,6 +587,16 @@ public partial class MainWindow : Window
     private static string? SelectedComboText(ComboBox comboBox)
     {
         return (comboBox.SelectedItem as ComboBoxItem)?.Content?.ToString();
+    }
+
+    private static string? SelectedComboKey(ComboBox comboBox)
+    {
+        if (comboBox.SelectedItem is not ComboBoxItem item)
+        {
+            return null;
+        }
+
+        return item.Tag?.ToString() ?? item.Content?.ToString();
     }
 
     private static double ParseDouble(string text, string field)

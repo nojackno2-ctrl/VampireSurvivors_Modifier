@@ -205,12 +205,10 @@
                             <ComboBoxItem Content="UnlockedArcanas" />
                             <ComboBoxItem Content="Achievements" />
                             <ComboBoxItem Content="Secrets" />
-                            <ComboBoxItem Content="UnlockedSkins" />
-                            <ComboBoxItem Content="UnlockedSkinsV2" />
                             <ComboBoxItem Content="BoughtSkins" />
                             <ComboBoxItem Content="OpenedCoffins" />
                         </ComboBox>
-                        <TextBlock Text="每行一個 ID" Foreground="#94A3B8" VerticalAlignment="Center" Margin="12,0" />
+                        <TextBlock Text="每行一個 ID；皮膚 dictionary 請用進階 JSON" Foreground="#94A3B8" VerticalAlignment="Center" Margin="12,0" />
                     </StackPanel>
                     <TextBox x:Name="UnlockIdsTextBox" Grid.Row="1" Margin="4,10" AcceptsReturn="True"
                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
@@ -235,30 +233,46 @@
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
                                 <TextBlock Text="角色 ID" VerticalAlignment="Center" />
-                                <TextBox x:Name="EggCharacterTextBox" Grid.Column="1" ToolTip="例如 ANTONIO" />
+                                <TextBox x:Name="EggCharacterTextBox" Grid.Column="1" ToolTip="例如 ANTONIO"
+                                         TextChanged="EggCharacterTextBox_TextChanged" />
                                 <TextBlock Grid.Row="1" Text="屬性" VerticalAlignment="Center" />
-                                <ComboBox x:Name="EggAttributeComboBox" Grid.Row="1" Grid.Column="1">
-                                    <ComboBoxItem Content="power" /><ComboBoxItem Content="growth" />
-                                    <ComboBoxItem Content="greed" /><ComboBoxItem Content="luck" />
-                                    <ComboBoxItem Content="cooldown" /><ComboBoxItem Content="moveSpeed" />
-                                    <ComboBoxItem Content="area" /><ComboBoxItem Content="amount" />
-                                    <ComboBoxItem Content="duration" /><ComboBoxItem Content="speed" />
-                                    <ComboBoxItem Content="armor" /><ComboBoxItem Content="regen" />
-                                    <ComboBoxItem Content="magnet" /><ComboBoxItem Content="maxHp" />
-                                    <ComboBoxItem Content="curse" /><ComboBoxItem Content="revivals" />
-                                    <ComboBoxItem Content="rerolls" /><ComboBoxItem Content="skips" />
-                                    <ComboBoxItem Content="banish" /><ComboBoxItem Content="charm" />
-                                    <ComboBoxItem Content="defang" />
+                                <ComboBox x:Name="EggAttributeComboBox" Grid.Row="1" Grid.Column="1"
+                                          SelectionChanged="EggAttributeComboBox_SelectionChanged">
+                                    <ComboBoxItem Content="攻擊力（power）" Tag="power" />
+                                    <ComboBoxItem Content="經驗成長（growth）" Tag="growth" />
+                                    <ComboBoxItem Content="金幣獲得（greed）" Tag="greed" />
+                                    <ComboBoxItem Content="幸運（luck）" Tag="luck" />
+                                    <ComboBoxItem Content="冷卻（cooldown）" Tag="cooldown" />
+                                    <ComboBoxItem Content="移動速度（moveSpeed）" Tag="moveSpeed" />
+                                    <ComboBoxItem Content="攻擊範圍（area）" Tag="area" />
+                                    <ComboBoxItem Content="投射物數量（amount）" Tag="amount" />
+                                    <ComboBoxItem Content="持續時間（duration）" Tag="duration" />
+                                    <ComboBoxItem Content="投射物速度（speed）" Tag="speed" />
+                                    <ComboBoxItem Content="護甲／防禦（armor）" Tag="armor" />
+                                    <ComboBoxItem Content="生命回復（regen）" Tag="regen" />
+                                    <ComboBoxItem Content="磁吸範圍（magnet）" Tag="magnet" />
+                                    <ComboBoxItem Content="最大生命（maxHp）" Tag="maxHp" />
+                                    <ComboBoxItem Content="詛咒（curse）" Tag="curse" />
+                                    <ComboBoxItem Content="復活次數（revivals）" Tag="revivals" />
+                                    <ComboBoxItem Content="重抽次數（rerolls）" Tag="rerolls" />
+                                    <ComboBoxItem Content="跳過次數（skips）" Tag="skips" />
+                                    <ComboBoxItem Content="放逐次數（banish）" Tag="banish" />
+                                    <ComboBoxItem Content="魅惑（charm）" Tag="charm" />
+                                    <ComboBoxItem Content="拔牙（defang）" Tag="defang" />
                                 </ComboBox>
-                                <TextBlock Grid.Row="2" Text="蛋數" VerticalAlignment="Center" />
-                                <TextBox x:Name="EggValueTextBox" Grid.Row="2" Grid.Column="1" />
+                                <TextBlock Grid.Row="2" Text="目前此屬性" VerticalAlignment="Center" />
+                                <TextBlock x:Name="EggCurrentValueText" Grid.Row="2" Grid.Column="1"
+                                           Foreground="#94A3B8" VerticalAlignment="Center" Margin="6" />
+                                <TextBlock Grid.Row="3" Text="金蛋數（設為）" VerticalAlignment="Center" />
+                                <TextBox x:Name="EggValueTextBox" Grid.Row="3" Grid.Column="1" />
                             </Grid>
                         </GroupBox>
                         <TextBlock Margin="16,4" Foreground="#94A3B8" TextWrapping="Wrap"
-                                   Text="套用後會重新計算該角色所有蛋屬性的 total。尚未寫入磁碟，必須再按右上角「備份並寫入」。" />
-                        <Button Content="套用蛋屬性" HorizontalAlignment="Right" Click="ApplyEggButton_Click" />
+                                   Text="一次只修改所選屬性；其他金蛋加成保持原值，並重新計算該角色的 total。尚未寫入磁碟，必須再按右上角「備份並寫入」。" />
+                        <Button Content="只套用此金蛋屬性" HorizontalAlignment="Right" Click="ApplyEggButton_Click" />
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
