@@ -17,6 +17,10 @@ dotnet build VSModifier.sln
 dotnet run --project VSModifier.Tests
 ```
 
+## AI 代理接手
+
+其他 AI 代理開始工作前必須先讀取 [AGENTS.md](AGENTS.md) 與 [AI_HANDOFF.md](AI_HANDOFF.md)，再檢查目前分支、`git status`、`git diff` 與近期 Commit。`AI_HANDOFF.md` 是即時專案記憶，重要修改、失敗嘗試、實機證據與下一步都必須立即更新。
+
 ## 安全原則
 
 - 存檔寫入前自動建立完整歷史備份。
@@ -26,6 +30,8 @@ dotnet run --project VSModifier.Tests
 - 線上模式必須自動停用記憶體功能。
 - 全域熱鍵預設停用，必須在 Trainer 頁手動啟用；`Ctrl+Shift+F12` 會緊急中斷 Trainer 並嘗試還原所有原始值。
 - 僅限單機與本地遊玩使用；成就與遊戲內 `CheatCodeUsed` 狀態的影響由使用者自行承擔。
+
+金蛋頁可針對角色逐一修改每個獨立屬性；攻擊、防禦、生命、冷卻、範圍等已知屬性都有中文選項，實際存檔中由新版遊戲新增的數值屬性也會自動加入選單。每次只改所選屬性，其他加成保持原值；衍生的 `total` 會自動重算，不提供手動破壞一致性的入口。
 
 ## Trainer 全域熱鍵
 
@@ -38,10 +44,10 @@ Trainer 不假設不同遊戲版本使用相同偏移。啟動時會同時計算
 本專案以目前 Steam 最新版為基準，之後隨遊戲最新版持續更新；不為缺少原始遊戲檔案、無法驗證的舊版本建立推測性 Profile。`offsets.json` 可並列目前與未來版本的 Profile，因此遊戲更新時不必改動 Trainer 核心架構；但每一版都必須重新抽取、分析並逐項驗證，不會沿用上一版的安全結論。遊戲改版後，先用 Il2CppDumper 對自己的 `GameAssembly.dll` 與 `global-metadata.dat` 產生 `dump.cs`。完整 dump 不得加入 repo；只可執行：
 
 ```powershell
-dotnet run --project VSModifier.IdExtractor -- <dump.cs> data\ids\unlocks.json
+dotnet run --project VSModifier.IdExtractor -- <dump.cs> steam-current-2026-07-22 data\ids\unlocks.json
 ```
 
-工具會抽出版本對應的角色、武器、關卡、Arcana、成就等事實性 ID。PowerUp 陣列以重複 ID 表示等級，抽取工具刻意不覆蓋，避免「全解鎖」反而降低既有等級。Trainer 偏移仍須另行分析並逐項實機驗證；完成後新增一筆帶有三檔雜湊的 Profile，不能只替換舊版本的雜湊。
+工具會把角色、武器、關卡、Arcana、成就等事實性 ID 寫入指定 `profileId`，並保留其他版本資料。一鍵全解鎖只會在三檔指紋命中同一個遊戲 Profile 時使用對應 ID 表，而且採安全合併：保留既有順序、重複等級與未收錄 ID，只追加缺少項目。PowerUp 陣列以重複 ID 表示等級，抽取工具刻意不產生這兩欄；皮膚的 `UnlockedSkins`／`UnlockedSkinsV2` 是 dictionary，不會誤當陣列覆寫，可由進階 JSON 編輯器處理。Trainer 偏移仍須另行分析並逐項實機驗證；完成後新增一筆帶有三檔雜湊的 Profile，不能只替換舊版本的雜湊。
 
 ## 版權與隱私
 

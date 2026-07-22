@@ -21,26 +21,77 @@ internal static partial class Program
 
     public static int Main(string[] args)
     {
-        if (args.Length != 2)
+        if (args.Length != 3)
         {
-            Console.Error.WriteLine("Usage: VSModifier.IdExtractor <dump.cs> <unlocks.json>");
+            Console.Error.WriteLine("Usage: VSModifier.IdExtractor <dump.cs> <profile-id> <unlocks.json>");
             return 2;
         }
 
         Dictionary<string, List<(string Name, int Value)>> enums = ReadEnums(args[0]);
-        JsonObject output = BuildCatalog(enums);
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(args[1]));
+        JsonObject arrays = BuildCatalog(enums);
+        string profileId = args[1];
+        ArgumentException.ThrowIfNullOrWhiteSpace(profileId);
+        string outputPath = args[2];
+        JsonObject output = LoadOrCreateCatalog(outputPath);
+        JsonArray profiles = output["profiles"]!.AsArray();
+        JsonObject profile = new()
+        {
+            ["profileId"] = profileId,
+            ["label"] = profileId,
+            ["arrays"] = arrays
+        };
+        int existingIndex = -1;
+        for (int index = 0; index < profiles.Count; index++)
+        {
+            if (string.Equals(profiles[index]?["profileId"]?.GetValue<string>(), profileId, StringComparison.Ordinal))
+            {
+                existingIndex = index;
+                break;
+            }
+        }
+
+        if (existingIndex >= 0)
+        {
+            profiles[existingIndex] = profile;
+        }
+        else
+        {
+            profiles.Add(profile);
+        }
+
+        string? directory = Path.GetDirectoryName(Path.GetFullPath(outputPath));
         if (directory is not null)
         {
             Directory.CreateDirectory(directory);
         }
 
         File.WriteAllText(
-            args[1],
+            outputPath,
             output.ToJsonString(new JsonSerializerOptions { WriteIndented = true }),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        Console.WriteLine($"Wrote {output.Count} unlock arrays without copying dump.cs into the project.");
+        Console.WriteLine($"Wrote {arrays.Count} unlock arrays for profile {profileId} without copying dump.cs into the project.");
         return 0;
+    }
+
+    private static JsonObject LoadOrCreateCatalog(string outputPath)
+    {
+        if (!File.Exists(outputPath))
+        {
+            return new JsonObject
+            {
+                ["schemaVersion"] = 1,
+                ["profiles"] = new JsonArray()
+            };
+        }
+
+        JsonObject root = JsonNode.Parse(File.ReadAllText(outputPath)) as JsonObject
+            ?? throw new InvalidDataException("unlocks.json 根節點必須是 object。");
+        if (root["schemaVersion"]?.GetValue<int>() != 1 || root["profiles"] is not JsonArray)
+        {
+            throw new InvalidDataException("unlocks.json 必須使用 schemaVersion 1 的 profiles 格式。");
+        }
+
+        return root;
     }
 
     private static Dictionary<string, List<(string Name, int Value)>> ReadEnums(string dumpPath)
@@ -116,7 +167,11 @@ internal static partial class Program
     private static string[] Names(IEnumerable<(string Name, int Value)> values, params string[] excluded)
     {
         HashSet<string> exclusions = new(excluded, StringComparer.OrdinalIgnoreCase);
-        return values.Where(value => !exclusions.Contains(value.Name)).Select(value => value.Name).ToArray();
+        return values
+            .Where(value => value.Value >= 0 && !exclusions.Contains(value.Name))
+            .Select(value => value.Name)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static JsonArray ToArray(IEnumerable<string> values)

@@ -1,5 +1,11 @@
 {
-  "BoughtCharacters": [
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "profileId": "steam-current-2026-07-22",
+      "label": "目前 Steam 版（擷取於 2026-07-22）",
+      "arrays": {
+        "BoughtCharacters": [
     "ANTONIO",
     "IMELDA",
     "PASQUALINA",
@@ -3499,5 +3505,8 @@
     "SKIN_TP_FAKE_TRIO_GRANT",
     "SKIN_TP_MORRIS_COATOFARMS",
     "SKIN_TP_ZEPHYR_BWAKA"
+        ]
+      }
+    }
   ]
 }

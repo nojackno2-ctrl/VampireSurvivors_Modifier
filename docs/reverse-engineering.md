@@ -10,6 +10,7 @@
 - IL2CPP metadata version：31
 - Profile 狀態：`verified: false`，只完成靜態推導，尚未實機讀寫驗證。
 - 版本辨識必須同時命中以上三個 SHA-256；任一檔案不同都視為另一個或混合版本，拒絕套用本 Profile。`offsets.json` schema 2 可並列多個三檔版本 Profile。
+- Profile ID：`steam-current-2026-07-22`。`data/ids/unlocks.json` 也以此 ID 綁定解鎖表，未知版本不得套用最新版 ID；一鍵操作採保留重複項目的聯集合併。
 - `GM_TypeInfo` RVA：`160283072`
 - `Il2CppClass.static_fields`：`0xB8`
 - `GM.Core`：靜態欄位 `+0x0`，指向 `GameManager`

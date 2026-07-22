@@ -4,6 +4,16 @@
 
 依 `DESIGN.md` 完成 C# WPF Vampire Survivors 修改器，包含存檔修改器與外部記憶體 Trainer，且不修改遊戲安裝檔案。
 
+## 接手代理立即執行
+
+1. 完整閱讀根目錄 `AGENTS.md`、本文件與 `DESIGN.md`。
+2. 執行 `git status --short`、`git diff`、`git log -8 --oneline`，不得覆蓋其他代理或使用者的未提交修改。
+3. 以 `dotnet build VSModifier.sln --configuration Debug` 與 `dotnet run --project VSModifier.Tests` 建立目前基準。
+4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
+5. 目前唯一需要使用者外部狀態的關鍵工作：進入任一單人關卡後，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
+
+最近重要 Commit：`e8e1deb`（三檔版本指紋）、`78dace3`（授權與發行前驗證）。目前工作樹可能正在進行版本化解鎖表與單屬性金蛋編輯修正，務必以 Git diff 為準。
+
 ## 已確認環境
 
 - 工作區起始時只有 `DESIGN.md`，不是 Git 儲存庫。
@@ -76,3 +86,7 @@
 - 三檔版本里程碑 commit `e8e1deb` 完成後重跑 Trainer 唯讀診斷：Profile 精確命中；`gameSpeed=1` 與 `maxTreasure` 兩段原始位元組可讀，其餘 22 項均在指標鏈第 3 層得到 null，與遊戲仍在主選單、`GM.Core` 尚未建立一致。未做任何記憶體寫入；須由使用者手動進入任一單人關卡後再驗證。
 - WPF 剩餘頁面已完成實際畫面 QA：資源、解鎖、蛋資料與旗標頁的文字、輸入欄、清單及按鈕均可讀，沒有重疊或裁切；QA 過程沒有按下任何套用或一鍵修改按鈕。至此所有主要頁籤皆有實際畫面證據。
 - 已補上設計計畫要求的 MIT `LICENSE`，README 連結授權條款。framework-dependent win-x64 Release publish 已驗證：包含 App／Core／Memory、`data/offsets.json`、`data/ids/unlocks.json`，不含 GameAssembly、metadata、dump、SaveData 等禁止檔；輸出只放在已忽略的 `artifacts/`，Trainer 未完成實機驗證前不發布。
+- 完整需求稽核發現解鎖頁列出 16 個陣列，但版本表只有 11 組，且 `UnlockedSkins`／`UnlockedSkinsV2` 實際為 dictionary，原本可能被陣列編輯器破壞。已將兩個 dictionary 從陣列 UI 移除，改由進階 JSON 處理；`offsets.json` 與 `unlocks.json` 以 `profileId` 精確綁定，一鍵解鎖改為原子安全合併，保留既有順序、重複 PowerUp 等級與未收錄 ID。
+- 使用者要求每個金蛋屬性都能單獨修改，例如只改攻擊或防禦。金蛋頁改用中文屬性名稱與內部 key 綁定，顯示選定角色／屬性的目前值；已知屬性全部可選，並會從實際 `EggData` 動態加入未來版本新增的數值屬性。套用只改該欄並重算衍生 `total`，其他屬性保持不變，角色 ID 比對不分大小寫。
+- 使用者明確要求保留 AI 交接文件，讓其他代理可繼續或修復。`AGENTS.md` 為協作規則，`AI_HANDOFF.md` 為即時狀態；README 已加入接手入口，本文件頂部新增接手命令與實機阻塞點。
+- 版本化解鎖與金蛋單屬性里程碑驗證：全方案建置 0 警告／0 錯誤，15/15 測試通過；實際安裝的三檔 Profile 與對應 unlock Profile 同時命中，IdExtractor 已驗證可保留多 Profile 且更新同 ID 不重複。實際 WPF QA 顯示 21 個已知金蛋屬性皆完整可選、中文標籤與目前值區無裁切；解鎖頁 dictionary 說明亦完整。QA 未套用或寫入存檔。

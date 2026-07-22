@@ -39,6 +39,8 @@ internal static class Program
             ("checksum calculation and application", TestChecksum),
             ("invalid checksum rejection", TestInvalidChecksumRejection),
             ("save editor operations", TestSaveEditor),
+            ("versioned unlock catalog and safe merge", TestUnlockCatalogMerge),
+            ("shipped version profile data consistency", TestShippedProfileData),
             ("JSON tree scalar editing", TestJsonTreeEditing),
             ("backup and safe write", TestBackupAndSafeWrite),
             ("running game blocks writes", TestRunningGameBlocksWrite),
@@ -94,13 +96,16 @@ internal static class Program
         OffsetCatalog catalog = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
         ProfileMatchResult match = catalog.Match(fingerprint);
         GameVersionProfile? profile = match.Profile;
+        UnlockCatalog unlockCatalog = UnlockCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "ids", "unlocks.json"));
+        UnlockCatalogProfile? unlockProfile = profile is null ? null : unlockCatalog.FindByProfileId(profile.ProfileId);
         Console.WriteLine($"PASS  located {candidates.Count} SaveData candidate(s).");
         Console.WriteLine($"PASS  live checksum valid: {document.OriginalChecksumIsValid}.");
         Console.WriteLine($"PASS  parsed {document.Root.Count} top-level fields without writing.");
         Console.WriteLine($"PASS  located {installations.Count} complete game installation(s).");
         Console.WriteLine($"PASS  current DLL/metadata profile combination registered: {profile is not null}.");
+        Console.WriteLine($"PASS  matching version unlock catalog registered: {unlockProfile is not null}.");
         Console.WriteLine($"PASS  current profile remains fail-closed: {profile is { Verified: false }}.");
-        return document.OriginalChecksumIsValid && profile is { Verified: false } ? 0 : 1;
+        return document.OriginalChecksumIsValid && profile is { Verified: false } && unlockProfile is not null ? 0 : 1;
     }
 
     private static int RunTrainerReadOnlyInspection()
@@ -191,11 +196,15 @@ internal static class Program
         SaveEditor editor = new(document);
         editor.MaximizeCommonResources();
         editor.SetFlag("AlwaysQuickTreasureAnim", true);
+        editor.SetEggAttribute("antonio", "armor", 4);
         editor.SetEggAttribute("ANTONIO", "power", 12);
         editor.SetEggAttribute("ANTONIO", "luck", 3);
-        editor.UnlockAll(new Dictionary<string, IReadOnlyCollection<string>>
+        editor.SetEggAttribute("ANTONIO", "futureVersionAttribute", 2);
+        editor.ReplaceArray("UnlockedCharacters", new JsonNode?[]
         {
-            ["UnlockedCharacters"] = ["ANTONIO", "IMELDA", "ANTONIO"]
+            JsonValue.Create("ANTONIO"),
+            JsonValue.Create("IMELDA"),
+            JsonValue.Create("ANTONIO")
         });
 
         string output = document.SerializeWithChecksum();
@@ -203,7 +212,16 @@ internal static class Program
         JsonObject root = JsonNode.Parse(output)!.AsObject();
         Equal(1_000_000_000_000d, root["Coins"]!.GetValue<double>(), "Coins were not maximized.");
         True(root["AlwaysQuickTreasureAnim"]!.GetValue<bool>(), "Quick treasure flag was not enabled.");
-        Equal(15d, root["EggData"]!["ANTONIO"]!["total"]!.GetValue<double>(), "Egg total was not synchronized.");
+        Equal(21d, root["EggData"]!["ANTONIO"]!["total"]!.GetValue<double>(), "Egg total was not synchronized.");
+        Equal(4d, root["EggData"]!["ANTONIO"]!["armor"]!.GetValue<double>(), "Editing attack must not change defense eggs.");
+        Equal(1, root["EggData"]!.AsObject().Count, "Character ID matching must be case-insensitive.");
+        True(editor.TryGetEggAttribute("AnToNiO", "power", out double powerEggs) && powerEggs == 12,
+            "Egg attribute lookup must be case-insensitive for character IDs.");
+        True(editor.GetEggAttributeNames().Contains("futureVersionAttribute", StringComparer.Ordinal),
+            "Every numeric EggData attribute from a future game version must be exposed.");
+        True(!editor.GetEggAttributeNames().Contains("total", StringComparer.Ordinal),
+            "Derived EggData total must not be directly editable as an independent attribute.");
+        Throws<ArgumentException>(() => editor.SetEggAttribute("ANTONIO", "total", 999));
         Equal(3, root["UnlockedCharacters"]!.AsArray().Count, "Unlock array duplicates must be preserved.");
 
         editor.ReplaceArray("UnlockedArcanas", new JsonNode?[] { JsonValue.Create(3), JsonValue.Create(3), JsonValue.Create(7) });
@@ -224,6 +242,90 @@ internal static class Program
         Equal(2.5d, root["count"]!.GetValue<double>(), "JSON tree replacement did not update the source object.");
         JsonTreeEntry nullEntry = tree.Children.Single(entry => entry.Name == "items").Children[1];
         Equal(JsonValueKind.Null, nullEntry.Kind, "JSON tree must preserve null node kind.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestShippedProfileData()
+    {
+        OffsetCatalog offsets = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
+        UnlockCatalog unlocks = UnlockCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "ids", "unlocks.json"));
+        True(offsets.Profiles.Count > 0, "At least one shipped game version profile is required.");
+        foreach (GameVersionProfile gameProfile in offsets.Profiles)
+        {
+            UnlockCatalogProfile unlockProfile = unlocks.FindByProfileId(gameProfile.ProfileId)
+                ?? throw new InvalidOperationException($"Missing unlock catalog for {gameProfile.ProfileId}.");
+            True(unlockProfile.Arrays.Count > 0, $"Unlock catalog {gameProfile.ProfileId} is empty.");
+            True(!unlockProfile.Arrays.ContainsKey("UnlockedSkins")
+                && !unlockProfile.Arrays.ContainsKey("UnlockedSkinsV2"),
+                "Skin dictionaries must not be shipped as unlock arrays.");
+            True(!unlockProfile.Arrays.ContainsKey("BoughtPowerups")
+                && !unlockProfile.Arrays.ContainsKey("UnlockedPowerUpRanks"),
+                "PowerUp rank arrays must not be generated from unique enum IDs.");
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static Task TestUnlockCatalogMerge()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"VSModifierTests_{Guid.NewGuid():N}");
+        string path = Path.Combine(directory, "unlocks.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(path, """
+                {
+                  "schemaVersion": 1,
+                  "profiles": [
+                    {
+                      "profileId": "test-current",
+                      "label": "test",
+                      "arrays": {
+                        "UnlockedCharacters": ["ANTONIO", "IMELDA"],
+                        "BoughtPowerups": ["MIGHT", "COOLDOWN"],
+                        "UnlockedArcanas": [1, 2]
+                      }
+                    }
+                  ]
+                }
+                """, Utf8WithoutBom);
+
+            UnlockCatalog catalog = UnlockCatalog.Load(path);
+            UnlockCatalogProfile profile = catalog.FindByProfileId("test-current")
+                ?? throw new InvalidOperationException("Expected unlock profile was not found.");
+            True(catalog.FindByProfileId("unknown") is null, "Unknown unlock profile must not match.");
+
+            SaveDocument document = SaveDocument.Parse(CreateValidSave());
+            document.Root["UnlockedCharacters"] = JsonNode.Parse("[\"ANTONIO\",\"ANTONIO\"]");
+            document.Root["BoughtPowerups"] = JsonNode.Parse("[\"MIGHT\",\"MIGHT\",\"MIGHT\"]");
+            document.Root["UnlockedArcanas"] = JsonNode.Parse("[1,1]");
+            document.Root["UnlockedSkinsV2"] = new JsonObject();
+            SaveEditor editor = new(document);
+            editor.MergeUnlockCatalog(profile.Arrays);
+
+            JsonArray characters = document.Root["UnlockedCharacters"]!.AsArray();
+            Equal(3, characters.Count, "Safe merge must preserve duplicates and append a missing character once.");
+            Equal("IMELDA", characters[2]!.GetValue<string>(), "Missing character was not appended.");
+            JsonArray powerups = document.Root["BoughtPowerups"]!.AsArray();
+            Equal(4, powerups.Count, "PowerUp ranks must be preserved while appending a missing ID once.");
+            Equal(3, powerups.Count(item => item?.GetValue<string>() == "MIGHT"), "Existing duplicate PowerUp ranks were changed.");
+            JsonArray arcanas = document.Root["UnlockedArcanas"]!.AsArray();
+            Equal(3, arcanas.Count, "Numeric unlock IDs must merge without removing duplicates.");
+
+            JsonObject invalid = new()
+            {
+                ["UnlockedCharacters"] = new JsonArray("PUGNALA"),
+                ["UnlockedSkinsV2"] = new JsonArray("SKIN_TEST")
+            };
+            Throws<InvalidDataException>(() => editor.MergeUnlockCatalog(invalid));
+            Equal(3, document.Root["UnlockedCharacters"]!.AsArray().Count,
+                "A structural mismatch must reject the whole merge atomically.");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
         return Task.CompletedTask;
     }
 
@@ -381,6 +483,7 @@ internal static class Program
                   "schemaVersion": 2,
                   "profiles": [
                     {
+                      "profileId": "test-current",
                       "gameAssemblySha256": "{{hash}}",
                       "unityPlayerSha256": "{{new string('b', 64)}}",
                       "il2CppMetadataSha256": "{{new string('c', 64)}}",
