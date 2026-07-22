@@ -46,3 +46,5 @@ dotnet run --project VSModifier.IdExtractor -- <dump.cs> data\ids\unlocks.json
 ## 版權與隱私
 
 本專案不包含 poncle 的遊戲檔案、metadata、Il2CppDumper 完整輸出、遊戲素材或個人 SaveData，亦與 poncle 無關。
+
+本專案程式碼採 [MIT License](LICENSE) 授權。
