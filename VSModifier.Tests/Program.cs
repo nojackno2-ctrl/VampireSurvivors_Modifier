@@ -44,6 +44,7 @@ internal static class Program
             ("pointer chain resolution", TestPointerChain),
             ("profile AOB RIP-relative resolution", TestProfileAobResolution),
             ("reversible memory patch", TestMemoryPatch),
+            ("atomic composite memory patch", TestMemoryPatchSet),
             ("offset catalog parsing", TestOffsetCatalog),
             ("value lock enforcement", TestValueLockService)
         ];
@@ -311,6 +312,35 @@ internal static class Program
         patch.Disable();
         True(memory.ReadBytes((nint)0x1010, 2).SequenceEqual(new byte[] { 0x74, 0x05 }), "Original bytes were not restored.");
         True(memory.CodeWriteCount >= 2, "Code writes did not use the protected path.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestMemoryPatchSet()
+    {
+        FakeMemory memory = new();
+        memory.WriteBytes((nint)0x1010, [0x74, 0x05]);
+        memory.WriteBytes((nint)0x1020, [0x75, 0x06]);
+        using MemoryPatch first = new(memory, (nint)0x1010, new byte[] { 0x90, 0x90 }, new byte[] { 0x74, 0x05 });
+        using MemoryPatch invalidSecond = new(memory, (nint)0x1020, new byte[] { 0x90, 0x90 }, new byte[] { 0x74, 0x06 });
+        using (MemoryPatchSet invalidSet = new([first, invalidSecond]))
+        {
+            Throws<InvalidDataException>(invalidSet.Enable);
+        }
+
+        True(memory.ReadBytes((nint)0x1010, 2).SequenceEqual(new byte[] { 0x74, 0x05 }),
+            "Composite patch must roll back earlier segments when a later segment fails.");
+
+        using MemoryPatch validFirst = new(memory, (nint)0x1010, new byte[] { 0x90, 0x90 }, new byte[] { 0x74, 0x05 });
+        using MemoryPatch validSecond = new(memory, (nint)0x1020, new byte[] { 0x90, 0x90 }, new byte[] { 0x75, 0x06 });
+        using (MemoryPatchSet validSet = new([validFirst, validSecond]))
+        {
+            validSet.Enable();
+            True(memory.ReadBytes((nint)0x1020, 2).SequenceEqual(new byte[] { 0x90, 0x90 }),
+                "Composite patch did not enable all segments.");
+        }
+
+        True(memory.ReadBytes((nint)0x1020, 2).SequenceEqual(new byte[] { 0x75, 0x06 }),
+            "Composite patch did not restore all segments.");
         return Task.CompletedTask;
     }
 

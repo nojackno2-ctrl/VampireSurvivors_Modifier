@@ -64,6 +64,17 @@ public sealed class FeatureDefinition
     public string? ExpectedBytes { get; init; }
 
     public string? PatchBytes { get; init; }
+
+    public List<PatchSegmentDefinition> AdditionalPatches { get; init; } = [];
+}
+
+public sealed class PatchSegmentDefinition
+{
+    public required AddressDefinition Address { get; init; }
+
+    public required string ExpectedBytes { get; init; }
+
+    public required string PatchBytes { get; init; }
 }
 
 public sealed class AddressDefinition

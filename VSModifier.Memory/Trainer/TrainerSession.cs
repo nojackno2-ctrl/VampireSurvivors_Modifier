@@ -11,7 +11,7 @@ public sealed class TrainerSession : IAsyncDisposable
     private readonly ProcessMemorySession _memory;
     private readonly ValueLockService _locks = new();
     private readonly Dictionary<string, byte[]> _originalValues = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, MemoryPatch> _patches = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, MemoryPatchSet> _patches = new(StringComparer.Ordinal);
     private bool _disposed;
 
     private TrainerSession(ProcessMemorySession memory, GameVersionProfile profile)
@@ -141,19 +141,21 @@ public sealed class TrainerSession : IAsyncDisposable
 
         EnsureOffline();
         FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Patch);
-        byte[] patch = ParseBytes(feature.PatchBytes, "patchBytes");
-        byte[]? expected = string.IsNullOrWhiteSpace(feature.ExpectedBytes)
-            ? null
-            : ParseBytes(feature.ExpectedBytes, "expectedBytes");
-        MemoryPatch memoryPatch = new(_memory, Resolve(feature.Address), patch, expected);
-        memoryPatch.Enable();
-        _patches.Add(featureKey, memoryPatch);
+        List<MemoryPatch> segments =
+        [
+            CreatePatch(feature.Address, feature.ExpectedBytes, feature.PatchBytes)
+        ];
+        segments.AddRange(feature.AdditionalPatches.Select(segment =>
+            CreatePatch(segment.Address, segment.ExpectedBytes, segment.PatchBytes)));
+        MemoryPatchSet patchSet = new(segments);
+        patchSet.Enable();
+        _patches.Add(featureKey, patchSet);
     }
 
     public void DisablePatch(string featureKey)
     {
         ThrowIfDisposed();
-        if (_patches.Remove(featureKey, out MemoryPatch? patch))
+        if (_patches.Remove(featureKey, out MemoryPatchSet? patch))
         {
             patch.Dispose();
         }
@@ -173,7 +175,7 @@ public sealed class TrainerSession : IAsyncDisposable
             await _locks.DisposeAsync();
             if (!_memory.HasExited)
             {
-                foreach (MemoryPatch patch in _patches.Values)
+                foreach (MemoryPatchSet patch in _patches.Values)
                 {
                     try
                     {
@@ -296,6 +298,15 @@ public sealed class TrainerSession : IAsyncDisposable
 
         string[] tokens = value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return tokens.Select(token => byte.Parse(token, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture)).ToArray();
+    }
+
+    private MemoryPatch CreatePatch(AddressDefinition address, string? expectedBytes, string? patchBytes)
+    {
+        byte[] patch = ParseBytes(patchBytes, "patchBytes");
+        byte[]? expected = string.IsNullOrWhiteSpace(expectedBytes)
+            ? null
+            : ParseBytes(expectedBytes, "expectedBytes");
+        return new MemoryPatch(_memory, Resolve(address), patch, expected);
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
