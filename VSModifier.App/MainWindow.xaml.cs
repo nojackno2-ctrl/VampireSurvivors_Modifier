@@ -599,17 +599,21 @@ public partial class MainWindow : Window
             TrainerGamePathText.Text = _gameInstallation.RootPath;
             string offsetsPath = Path.Combine(AppContext.BaseDirectory, "data", "offsets.json");
             _offsetCatalog = OffsetCatalog.Load(offsetsPath);
-            string fingerprint = await Task.Run(() => GameAssemblyFingerprint.CalculateSha256(_gameInstallation.GameAssemblyPath));
-            _gameProfile = _offsetCatalog.FindByHash(fingerprint);
+            GameVersionFingerprint fingerprint = await Task.Run(() => GameVersionFingerprint.Calculate(
+                _gameInstallation.GameAssemblyPath,
+                _gameInstallation.UnityPlayerPath,
+                _gameInstallation.MetadataPath));
+            ProfileMatchResult match = _offsetCatalog.Match(fingerprint);
+            _gameProfile = match.Profile;
             if (_gameProfile is null)
             {
-                TrainerVersionText.Text = $"未知版本（{fingerprint[..12]}…）";
-                TrainerStatusText.Text = "offsets.json 沒有此版本，已拒絕附加。";
+                TrainerVersionText.Text = $"未知組合（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
+                TrainerStatusText.Text = $"{match.Error} 已拒絕附加。";
                 TrainerStatusText.Foreground = Brushes.OrangeRed;
                 return;
             }
 
-            TrainerVersionText.Text = $"{_gameProfile.Label}（{fingerprint[..12]}…）";
+            TrainerVersionText.Text = $"{_gameProfile.Label}（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
             if (!_gameProfile.Verified)
             {
                 TrainerStatusText.Text = "版本已辨識，但偏移尚未實機驗證；已拒絕附加。";
@@ -650,7 +654,11 @@ public partial class MainWindow : Window
         {
             AttachTrainerButton.IsEnabled = false;
             TrainerStatusText.Text = "正在安全附加…";
-            _trainerSession = await Task.Run(() => TrainerSession.Attach(_offsetCatalog, _gameInstallation.GameAssemblyPath));
+            _trainerSession = await Task.Run(() => TrainerSession.Attach(
+                _offsetCatalog,
+                _gameInstallation.GameAssemblyPath,
+                _gameInstallation.UnityPlayerPath,
+                _gameInstallation.MetadataPath));
             DetachTrainerButton.IsEnabled = true;
             TrainerControlsPanel.IsEnabled = true;
             UpdateTrainerFeatureAvailability();

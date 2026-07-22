@@ -13,12 +13,20 @@ public sealed record TrainerDiagnosticResult(
 
 public static class TrainerDiagnostics
 {
-    public static TrainerDiagnosticResult InspectReadOnly(OffsetCatalog catalog, string gameAssemblyPath)
+    public static TrainerDiagnosticResult InspectReadOnly(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath)
     {
         ArgumentNullException.ThrowIfNull(catalog);
-        string fingerprint = GameAssemblyFingerprint.CalculateSha256(gameAssemblyPath);
-        GameVersionProfile profile = catalog.FindByHash(fingerprint)
-            ?? throw new InvalidOperationException("offsets.json 沒有目前 GameAssembly.dll 的 profile。");
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath);
+        ProfileMatchResult match = catalog.Match(fingerprint);
+        GameVersionProfile profile = match.Profile
+            ?? throw new InvalidOperationException(match.Error ?? "offsets.json 沒有目前遊戲版本的 profile。");
         using ProcessMemorySession memory = ProcessMemorySession.AttachReadOnly();
 
         DiagnosticValue online = profile.OnlineSession is null

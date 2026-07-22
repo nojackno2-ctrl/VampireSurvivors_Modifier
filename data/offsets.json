@@ -1,9 +1,11 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "profiles": [
     {
       "gameAssemblySha256": "f43017baa184cc6a5d6f6cc41d5bce28eaba5e164083dfa2ecb136fbbdb00dab",
-      "label": "local build 2026-07-19",
+      "unityPlayerSha256": "4abd2ee6d6ca6176b3122a22cc0264ea0e3c1674bd2969621fe72decbf7b5134",
+      "il2CppMetadataSha256": "ad18e1db49fded4c18d6bf7c1a5e607ff80712c743770c833dcbd540bb939498",
+      "label": "目前 Steam 版（擷取於 2026-07-22）",
       "verified": false,
       "onlineSession": {
         "module": "GameAssembly.dll",
