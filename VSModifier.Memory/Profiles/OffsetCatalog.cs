@@ -1,10 +1,19 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using VSModifier.Memory.Scanning;
 
 namespace VSModifier.Memory.Profiles;
 
 public sealed class OffsetCatalog
 {
+    private static readonly HashSet<string> RequiredVerifiedFeatures = new(StringComparer.Ordinal)
+    {
+        "invulnerability", "quickTreasure", "maxTreasure", "gameSpeed", "damageMultiplier",
+        "stat.growth", "stat.greed", "stat.luck", "stat.cooldown", "stat.moveSpeed",
+        "stat.area", "stat.amount", "stat.duration", "stat.speed", "stat.armor",
+        "stat.regen", "stat.magnet", "stat.revivals", "stat.rerolls", "stat.skips",
+        "stat.banish", "stat.curse", "stat.charm", "stat.defang"
+    };
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -87,6 +96,28 @@ public sealed class OffsetCatalog
             {
                 throw new InvalidDataException($"已驗證 Profile {profile.Label} 缺少線上會話防護。");
             }
+
+            if (profile.OnlineSession is not null)
+            {
+                ValidateAddress(profile.OnlineSession, $"Profile {profile.Label} onlineSession");
+            }
+
+            foreach ((string featureKey, FeatureDefinition feature) in profile.Features)
+            {
+                ValidateFeature(profile.Label, featureKey, feature);
+            }
+
+            if (profile.Verified)
+            {
+                string[] missingFeatures = RequiredVerifiedFeatures
+                    .Where(featureKey => !profile.Features.ContainsKey(featureKey))
+                    .ToArray();
+                if (missingFeatures.Length > 0)
+                {
+                    throw new InvalidDataException(
+                        $"已驗證 Profile {profile.Label} 缺少必要功能：{string.Join(", ", missingFeatures)}。");
+                }
+            }
         }
 
         bool duplicate = Profiles
@@ -108,6 +139,112 @@ public sealed class OffsetCatalog
     private static bool IsSha256(string? value)
     {
         return value is { Length: 64 } && value.All(Uri.IsHexDigit);
+    }
+
+    private static void ValidateFeature(string profileLabel, string featureKey, FeatureDefinition feature)
+    {
+        if (string.IsNullOrWhiteSpace(featureKey))
+        {
+            throw new InvalidDataException($"Profile {profileLabel} 包含空白功能鍵。");
+        }
+
+        if (!Enum.IsDefined(feature.Kind) || !Enum.IsDefined(feature.ValueType))
+        {
+            throw new InvalidDataException($"Profile {profileLabel} 的功能 {featureKey} 種類或數值型別無效。");
+        }
+
+        ValidateAddress(feature.Address, $"Profile {profileLabel} feature {featureKey}");
+        if (feature.Kind == FeatureKind.Value)
+        {
+            if (!string.IsNullOrWhiteSpace(feature.ExpectedBytes)
+                || !string.IsNullOrWhiteSpace(feature.PatchBytes)
+                || feature.AdditionalPatches.Count > 0)
+            {
+                throw new InvalidDataException($"數值功能 {featureKey} 不得包含 patch 位元組。");
+            }
+
+            return;
+        }
+
+        ValidatePatchBytes(featureKey, feature.ExpectedBytes, feature.PatchBytes);
+        foreach ((PatchSegmentDefinition segment, int index) in feature.AdditionalPatches.Select((segment, index) => (segment, index)))
+        {
+            ValidateAddress(segment.Address, $"Profile {profileLabel} feature {featureKey} patch {index + 2}");
+            ValidatePatchBytes($"{featureKey} patch {index + 2}", segment.ExpectedBytes, segment.PatchBytes);
+        }
+    }
+
+    private static void ValidateAddress(AddressDefinition address, string field)
+    {
+        if (string.IsNullOrWhiteSpace(address.Module))
+        {
+            throw new InvalidDataException($"{field} 缺少 module。");
+        }
+
+        if (address.BaseOffset < 0)
+        {
+            throw new InvalidDataException($"{field} 的 baseOffset 不得為負數。");
+        }
+
+        if (string.IsNullOrWhiteSpace(address.Aob))
+        {
+            if (address.RipRelativeOffset is not null)
+            {
+                throw new InvalidDataException($"{field} 沒有 AOB，不能設定 ripRelativeOffset。");
+            }
+
+            return;
+        }
+
+        if (address.BaseOffset != 0)
+        {
+            throw new InvalidDataException($"{field} 使用 AOB 時不得同時設定 baseOffset。");
+        }
+
+        AobPattern pattern;
+        try
+        {
+            pattern = AobPattern.Parse(address.Aob);
+        }
+        catch (Exception exception) when (exception is FormatException or OverflowException)
+        {
+            throw new InvalidDataException($"{field} 的 AOB 格式無效。", exception);
+        }
+
+        if (address.RipRelativeOffset is int relativeOffset
+            && (relativeOffset < 0 || relativeOffset + sizeof(int) > pattern.Length))
+        {
+            throw new InvalidDataException($"{field} 的 ripRelativeOffset 超出 AOB 範圍。");
+        }
+    }
+
+    private static void ValidatePatchBytes(string featureKey, string? expectedText, string? patchText)
+    {
+        byte[] expected = ParseHexBytes(expectedText, $"{featureKey} expectedBytes");
+        byte[] patch = ParseHexBytes(patchText, $"{featureKey} patchBytes");
+        if (expected.Length != patch.Length)
+        {
+            throw new InvalidDataException($"Patch {featureKey} 的 expectedBytes 與 patchBytes 長度不同。");
+        }
+    }
+
+    private static byte[] ParseHexBytes(string? value, string field)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidDataException($"缺少 {field}。");
+        }
+
+        try
+        {
+            return Convert.FromHexString(string.Concat(value.Split(
+                ' ',
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException($"{field} 不是有效的十六進位位元組。", exception);
+        }
     }
 }
 
