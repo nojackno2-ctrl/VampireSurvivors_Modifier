@@ -24,7 +24,12 @@ dotnet run --project VSModifier.Tests
 - 寫回採 UTF-8 無 BOM，並重算已驗證的 SHA-256 checksum。
 - Trainer 僅使用外部行程記憶體讀寫，不注入 DLL。
 - 線上模式必須自動停用記憶體功能。
+- 全域熱鍵預設停用，必須在 Trainer 頁手動啟用；`Ctrl+Shift+F12` 會緊急中斷 Trainer 並嘗試還原所有原始值。
 - 僅限單機與本地遊玩使用；成就與遊戲內 `CheatCodeUsed` 狀態的影響由使用者自行承擔。
+
+## Trainer 全域熱鍵
+
+啟用後使用 `Ctrl+Shift+F1` 至 `F5` 切換無敵、快速寶箱、最高寶箱、傷害倍率與遊戲速率；`Ctrl+Shift+F12` 為緊急中斷並還原。功能熱鍵只有在已辨識版本、確認單人狀態並安全附加後才會執行。
 
 ## 遊戲更新與資料抽取
 

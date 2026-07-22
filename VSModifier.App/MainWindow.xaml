@@ -10,6 +10,9 @@
         <SolidColorBrush x:Key="PanelBrush" Color="#19212D" />
         <SolidColorBrush x:Key="BorderBrush" Color="#334155" />
         <SolidColorBrush x:Key="AccentBrush" Color="#E8B44A" />
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#E8EDF4" />
+        </Style>
         <Style TargetType="Button">
             <Setter Property="Padding" Value="14,7" />
             <Setter Property="Margin" Value="4" />
@@ -17,6 +20,13 @@
             <Setter Property="Foreground" Value="#F8FAFC" />
             <Setter Property="BorderBrush" Value="#475569" />
             <Setter Property="Cursor" Value="Hand" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#1F2937" />
+                    <Setter Property="Foreground" Value="#7C8AA0" />
+                    <Setter Property="BorderBrush" Value="#334155" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Padding" Value="8,6" />
@@ -25,6 +35,13 @@
             <Setter Property="Foreground" Value="#F8FAFC" />
             <Setter Property="BorderBrush" Value="#475569" />
             <Setter Property="CaretBrush" Value="#F8FAFC" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Background" Value="#111827" />
+                    <Setter Property="Foreground" Value="#7C8AA0" />
+                    <Setter Property="Opacity" Value="1" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Padding" Value="8,6" />
@@ -33,6 +50,13 @@
         <Style TargetType="CheckBox">
             <Setter Property="Margin" Value="8" />
             <Setter Property="FontSize" Value="15" />
+            <Setter Property="Foreground" Value="#E8EDF4" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="#7C8AA0" />
+                    <Setter Property="Opacity" Value="1" />
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="GroupBox">
             <Setter Property="Margin" Value="8" />
@@ -302,6 +326,14 @@
                             <TextBlock TextWrapping="Wrap" Foreground="#FDE68A"
                                        Text="僅限單機／本地遊玩。缺少已驗證版本、功能偏移或線上會話防護時，程式會拒絕附加。遊戲關閉或中斷 Trainer 時會嘗試還原所有原始值。" />
                         </Border>
+                        <GroupBox Header="全域熱鍵">
+                            <StackPanel Margin="8">
+                                <CheckBox x:Name="EnableHotkeysCheckBox" Content="啟用全域熱鍵（預設停用）"
+                                          Click="EnableHotkeysCheckBox_Click" />
+                                <TextBlock Margin="0,8,0,0" Foreground="#94A3B8" TextWrapping="Wrap"
+                                           Text="Ctrl+Shift+F1 無敵｜Ctrl+Shift+F2 快速寶箱｜Ctrl+Shift+F3 最高寶箱｜Ctrl+Shift+F4 傷害倍率｜Ctrl+Shift+F5 遊戲速率｜Ctrl+Shift+F12 緊急中斷並還原。功能熱鍵只有在 Trainer 已安全附加時才會執行。" />
+                            </StackPanel>
+                        </GroupBox>
                         <StackPanel x:Name="TrainerControlsPanel" IsEnabled="False">
                             <GroupBox Header="主要功能">
                                 <StackPanel>

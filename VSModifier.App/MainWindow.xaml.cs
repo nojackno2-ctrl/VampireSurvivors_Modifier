@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using VSModifier.App.Hotkeys;
 using VSModifier.Core.Game;
 using VSModifier.Core.Saves;
 using VSModifier.Memory.Profiles;
@@ -34,6 +35,7 @@ public partial class MainWindow : Window
     private OffsetCatalog? _offsetCatalog;
     private GameVersionProfile? _gameProfile;
     private TrainerSession? _trainerSession;
+    private GlobalHotkeyService? _hotkeyService;
     private bool _updatingTrainerUi;
 
     public MainWindow()
@@ -42,8 +44,23 @@ public partial class MainWindow : Window
         _saveFileService = new SaveFileService(_processDetector);
         _statusTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, StatusTimer_Tick, Dispatcher);
         CreateTrainerAttributeControls();
+        SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
+    }
+
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        try
+        {
+            _hotkeyService = new GlobalHotkeyService(this);
+            _hotkeyService.HotkeyPressed += HotkeyService_HotkeyPressed;
+        }
+        catch (Exception exception)
+        {
+            EnableHotkeysCheckBox.IsEnabled = false;
+            EnableHotkeysCheckBox.ToolTip = exception.Message;
+        }
     }
 
     private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -608,9 +625,90 @@ public partial class MainWindow : Window
     private async void MainWindow_Closed(object? sender, EventArgs e)
     {
         _statusTimer.Stop();
+        _hotkeyService?.Dispose();
+        _hotkeyService = null;
         if (_trainerSession is not null)
         {
             await DetachTrainerAsync("Trainer 已關閉。", showErrors: false);
+        }
+    }
+
+    private void EnableHotkeysCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_hotkeyService is null)
+        {
+            EnableHotkeysCheckBox.IsChecked = false;
+            TrainerStatusText.Text = "全域熱鍵服務尚未就緒。";
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            return;
+        }
+
+        try
+        {
+            if (EnableHotkeysCheckBox.IsChecked == true)
+            {
+                _hotkeyService.RegisterDefaults();
+                TrainerStatusText.Text = "全域熱鍵已啟用；Ctrl+Shift+F12 可緊急中斷並還原。";
+                TrainerStatusText.Foreground = Brushes.LightGreen;
+            }
+            else
+            {
+                _hotkeyService.UnregisterAll();
+                TrainerStatusText.Text = "全域熱鍵已停用。";
+                TrainerStatusText.Foreground = Brushes.LightGray;
+            }
+        }
+        catch (Exception exception)
+        {
+            EnableHotkeysCheckBox.IsChecked = false;
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private void HotkeyService_HotkeyPressed(object? sender, TrainerHotkeyCommand command)
+    {
+        if (command == TrainerHotkeyCommand.EmergencyDetach)
+        {
+            _ = DetachTrainerAsync("已由緊急熱鍵中斷 Trainer 並還原原始值。", showErrors: true);
+            return;
+        }
+
+        if (_trainerSession is null)
+        {
+            TrainerStatusText.Text = "熱鍵未執行：Trainer 尚未附加。";
+            TrainerStatusText.Foreground = Brushes.Orange;
+            return;
+        }
+
+        CheckBox toggle = command switch
+        {
+            TrainerHotkeyCommand.ToggleInvulnerability => InvulnerabilityCheckBox,
+            TrainerHotkeyCommand.ToggleQuickTreasure => QuickTreasureRuntimeCheckBox,
+            TrainerHotkeyCommand.ToggleMaxTreasure => MaxTreasureCheckBox,
+            TrainerHotkeyCommand.ToggleDamageMultiplier => DamageMultiplierCheckBox,
+            TrainerHotkeyCommand.ToggleGameSpeed => GameSpeedCheckBox,
+            _ => throw new ArgumentOutOfRangeException(nameof(command))
+        };
+        if (!toggle.IsEnabled)
+        {
+            TrainerStatusText.Text = $"熱鍵未執行：此版本不支援 {toggle.Content}。";
+            TrainerStatusText.Foreground = Brushes.Orange;
+            return;
+        }
+
+        toggle.IsChecked = toggle.IsChecked != true;
+        if (command is TrainerHotkeyCommand.ToggleInvulnerability or TrainerHotkeyCommand.ToggleQuickTreasure)
+        {
+            TrainerDirectValueCheckBox_Click(toggle, new RoutedEventArgs());
+        }
+        else if (command == TrainerHotkeyCommand.ToggleMaxTreasure)
+        {
+            TrainerPatchCheckBox_Click(toggle, new RoutedEventArgs());
+        }
+        else
+        {
+            TrainerMultiplierCheckBox_Click(toggle, new RoutedEventArgs());
         }
     }
 
