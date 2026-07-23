@@ -29,8 +29,12 @@ public sealed class OffsetCatalog
     public static OffsetCatalog Load(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        string json = File.ReadAllText(path);
-        OffsetCatalog catalog = JsonSerializer.Deserialize<OffsetCatalog>(json, JsonOptions)
+        return Parse(File.ReadAllBytes(path));
+    }
+
+    public static OffsetCatalog Parse(ReadOnlySpan<byte> utf8Json)
+    {
+        OffsetCatalog catalog = JsonSerializer.Deserialize<OffsetCatalog>(utf8Json, JsonOptions)
             ?? throw new InvalidDataException("offsets.json 內容為空。");
         if (catalog.SchemaVersion != 2)
         {

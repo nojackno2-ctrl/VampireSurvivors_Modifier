@@ -24,6 +24,8 @@ public partial class MainWindow : Window
     private readonly SaveFileService _saveFileService;
     private readonly SavePathLocator _savePathLocator = new();
     private readonly DispatcherTimer _statusTimer;
+    private readonly OffsetCatalogFile _offsetCatalogFile =
+        new(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
     private readonly Dictionary<string, (CheckBox Toggle, TextBox Value)> _trainerAttributeControls = new(StringComparer.Ordinal);
     private readonly HashSet<string> _additiveTrainerFeatures = new(StringComparer.Ordinal)
     {
@@ -37,6 +39,7 @@ public partial class MainWindow : Window
     private TrainerSession? _trainerSession;
     private GlobalHotkeyService? _hotkeyService;
     private bool _updatingTrainerUi;
+    private bool _refreshingTrainerProfile;
     private JsonTreeEntry? _selectedJsonTreeEntry;
 
     public MainWindow()
@@ -92,6 +95,13 @@ public partial class MainWindow : Window
         {
             await DetachTrainerAsync("遊戲行程已結束；Trainer 已中斷。", showErrors: false);
         }
+
+        if (_trainerSession is null
+            && !_refreshingTrainerProfile
+            && _offsetCatalogFile.HasChanged())
+        {
+            await InitializeTrainerAsync();
+        }
     }
 
     private void UpdateGameStatus()
@@ -105,6 +115,7 @@ public partial class MainWindow : Window
         AttachTrainerButton.IsEnabled = running
             && _trainerSession is null
             && _gameProfile is { Verified: true, OnlineSession: not null };
+        RefreshTrainerProfileButton.IsEnabled = _trainerSession is null && !_refreshingTrainerProfile;
     }
 
     private async void DetectSaveButton_Click(object sender, RoutedEventArgs e)
@@ -146,7 +157,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ReloadButton_Click(object sender, RoutedEventArgs e) => await LoadSaveAsync();
+    private async void ReloadButton_Click(object sender, RoutedEventArgs e)
+    {
+        await LoadSaveAsync();
+        await InitializeTrainerAsync();
+    }
 
     private async Task LoadSaveAsync()
     {
@@ -688,9 +703,18 @@ public partial class MainWindow : Window
 
     private async Task InitializeTrainerAsync()
     {
+        if (_refreshingTrainerProfile || _trainerSession is not null)
+        {
+            return;
+        }
+
+        _refreshingTrainerProfile = true;
+        _gameProfile = null;
+        _offsetCatalog = null;
         try
         {
             TrainerStatusText.Text = "正在辨識遊戲版本…";
+            TrainerStatusText.Foreground = Brushes.LightGray;
             _gameInstallation = new GameInstallationLocator().FindInstallations().FirstOrDefault();
             if (_gameInstallation is null)
             {
@@ -701,8 +725,7 @@ public partial class MainWindow : Window
             }
 
             TrainerGamePathText.Text = _gameInstallation.RootPath;
-            string offsetsPath = Path.Combine(AppContext.BaseDirectory, "data", "offsets.json");
-            _offsetCatalog = OffsetCatalog.Load(offsetsPath);
+            _offsetCatalog = _offsetCatalogFile.Reload();
             GameVersionFingerprint fingerprint = await Task.Run(() => GameVersionFingerprint.Calculate(
                 _gameInstallation.GameAssemblyPath,
                 _gameInstallation.UnityPlayerPath,
@@ -712,15 +735,15 @@ public partial class MainWindow : Window
             if (_gameProfile is null)
             {
                 TrainerVersionText.Text = $"未知組合（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
-                TrainerStatusText.Text = $"{match.Error} 已拒絕附加。";
+                TrainerStatusText.Text = $"{match.Error} 已拒絕附加；若剛更新 Profile，可按「重新偵測版本」。";
                 TrainerStatusText.Foreground = Brushes.OrangeRed;
                 return;
             }
 
-            TrainerVersionText.Text = $"{_gameProfile.Label}（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
+            TrainerVersionText.Text = $"{_gameProfile.Label} [{_gameProfile.ProfileId}]（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
             if (!_gameProfile.Verified)
             {
-                TrainerStatusText.Text = "版本已辨識，但偏移尚未實機驗證；已拒絕附加。";
+                TrainerStatusText.Text = "版本已辨識，但偏移尚未完成單人關卡實機驗證；這不是按鈕故障，驗證完成前會拒絕附加。";
                 TrainerStatusText.Foreground = Brushes.Orange;
                 return;
             }
@@ -743,20 +766,30 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _refreshingTrainerProfile = false;
             UpdateGameStatus();
         }
     }
 
+    private async void RefreshTrainerProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        await InitializeTrainerAsync();
+    }
+
     private async void AttachTrainerButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_offsetCatalog is null || _gameInstallation is null)
-        {
-            return;
-        }
-
         try
         {
             AttachTrainerButton.IsEnabled = false;
+            TrainerStatusText.Text = "附加前正在重新驗證版本…";
+            await InitializeTrainerAsync();
+            if (_offsetCatalog is null
+                || _gameInstallation is null
+                || _gameProfile is not { Verified: true, OnlineSession: not null })
+            {
+                return;
+            }
+
             TrainerStatusText.Text = "正在安全附加…";
             _trainerSession = await Task.Run(() => TrainerSession.Attach(
                 _offsetCatalog,
@@ -774,6 +807,10 @@ public partial class MainWindow : Window
         {
             TrainerStatusText.Text = exception.Message;
             TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+        finally
+        {
+            UpdateGameStatus();
         }
     }
 

@@ -370,6 +370,8 @@
                                 <TextBlock Grid.Row="2" Text="Trainer 狀態" Foreground="#94A3B8" Margin="0,5" />
                                 <TextBlock x:Name="TrainerStatusText" Grid.Row="2" Grid.Column="1" Margin="0,5" TextWrapping="Wrap" />
                                 <StackPanel Grid.Column="2" Grid.RowSpan="3" Orientation="Vertical" VerticalAlignment="Center">
+                                    <Button x:Name="RefreshTrainerProfileButton" Content="重新偵測版本"
+                                            Click="RefreshTrainerProfileButton_Click" />
                                     <Button x:Name="AttachTrainerButton" Content="附加遊戲" Click="AttachTrainerButton_Click" IsEnabled="False" />
                                     <Button x:Name="DetachTrainerButton" Content="中斷並還原" Click="DetachTrainerButton_Click" IsEnabled="False" />
                                 </StackPanel>
