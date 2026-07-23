@@ -44,7 +44,7 @@ dotnet publish VSModifier.App -p:PublishProfile=win-x64-folder
 
 ## 遊戲更新與資料抽取
 
-Trainer 不假設不同遊戲版本使用相同偏移。啟動時會同時計算 `GameAssembly.dll`、`UnityPlayer.dll` 與 `global-metadata.dat` 的 SHA-256，三者必須精確符合 `data/offsets.json` 內同一個版本 Profile，才會採用該 Profile 專屬的指標鏈、AOB、原始位元組與 patch。Profile 載入時還會驗證 AOB、RIP-relative 範圍、patch 等長性與必要功能集合；未知版本、混搭檔案、結構錯誤或尚未完成實機驗證的 Profile 一律拒絕附加。
+Trainer 不假設不同遊戲版本使用相同偏移。啟動時會同時計算 `GameAssembly.dll`、`UnityPlayer.dll` 與 `global-metadata.dat` 的 SHA-256，三者必須精確符合 `data/offsets.json` 內同一個版本 Profile，才會採用該 Profile 專屬的指標鏈、AOB、原始位元組與 patch。Profile 載入時還會驗證 AOB、RIP-relative 範圍、patch 等長性與必要功能集合；未知版本、混搭檔案、結構錯誤或尚未完成實機驗證的 Profile 一律拒絕附加。修改器未附加時會監看 `offsets.json` 的內容變化並自動重新辨識；也可在 Trainer 頁按「重新偵測版本」，而每次正式附加前仍會再重算一次三檔指紋，避免長時間開啟的舊行程沿用過期 Profile。
 
 本專案以目前 Steam 最新版為基準，之後隨遊戲最新版持續更新；不為缺少原始遊戲檔案、無法驗證的舊版本建立推測性 Profile。`offsets.json` 可並列目前與未來版本的 Profile，因此遊戲更新時不必改動 Trainer 核心架構；但每一版都必須重新抽取、分析並逐項驗證，不會沿用上一版的安全結論。遊戲改版後，先用 Il2CppDumper 對自己的 `GameAssembly.dll` 與 `global-metadata.dat` 產生 `dump.cs`。完整 dump 不得加入 repo；只可執行：
 

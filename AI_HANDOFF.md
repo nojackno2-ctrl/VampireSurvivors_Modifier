@@ -10,9 +10,9 @@
 2. 執行 `git status --short`、`git diff`、`git log -8 --oneline`，不得覆蓋其他代理或使用者的未提交修改。
 3. 以 `dotnet build VSModifier.sln --configuration Debug` 與 `dotnet run --project VSModifier.Tests` 建立目前基準。
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
-5. 2026-07-23 遊戲已更新，先為新三檔指紋重新建立 Profile；之後進入任一單人關卡，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
+5. 2026-07-23 新三檔 Profile 已完成重新抽取、靜態更新與熱重新載入支援；接著進入任一單人關卡，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
-最近重要 Commit：`74fbdab`（受控 Trainer 實機驗證流程）、`36f1234`（Visual Studio 發布包安全設定）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。接手時仍務必以 Git log、status 與 diff 為準。
+最近重要 Commit：`e3347dc`（Trainer 版本資料熱重新載入）、`40a9949`（2026-07-23 遊戲版本資料）、`74fbdab`（受控 Trainer 實機驗證流程）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。兩個最新 commit 尚未 push，接手時仍務必以 Git log、status 與 diff 為準。
 
 ## 已確認環境
 
@@ -69,10 +69,10 @@
 
 ## 下一步
 
-1. 對 2026-07-23 新版 GameAssembly／metadata 重新執行 Il2CppDumper，更新版本化解鎖 ID 與所有候選偏移；舊 Profile 必須保留。
-2. 在實際單人關卡內對新版 Profile 重跑唯讀診斷，確認線上 guard 與角色／屬性鏈。
-3. 逐項執行可逆短時間寫入驗證，確認線上 guard、還原與實際遊戲效果後才將新版 profile 設為已驗證。
-4. 實際開箱驗證寶箱最高獎勵 patch。
+1. 在實際單人關卡內對 `steam-current-2026-07-23` 重跑唯讀診斷，確認 `onlineSession=0` 與全部角色／屬性鏈。
+2. 逐項執行可逆短時間寫入驗證，確認線上 guard、還原與實際遊戲效果。
+3. 實際開箱並配合 log 驗證寶箱最高獎勵複合 patch。
+4. 全部通過後才將新版 Profile 設為 `verified: true`，重跑 WPF 正式附加與 Release／發布稽核。
 
 ## 最新診斷紀錄（2026-07-22）
 
