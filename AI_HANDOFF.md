@@ -10,7 +10,7 @@
 2. 執行 `git status --short`、`git diff`、`git log -8 --oneline`，不得覆蓋其他代理或使用者的未提交修改。
 3. 以 `dotnet build VSModifier.sln --configuration Debug` 與 `dotnet run --project VSModifier.Tests` 建立目前基準。
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
-5. 目前唯一需要使用者外部狀態的關鍵工作：進入任一單人關卡後，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
+5. 2026-07-23 遊戲已更新，先為新三檔指紋重新建立 Profile；之後進入任一單人關卡，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
 最近重要 Commit：`74fbdab`（受控 Trainer 實機驗證流程）、`36f1234`（Visual Studio 發布包安全設定）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。接手時仍務必以 Git log、status 與 diff 為準。
 
@@ -69,9 +69,10 @@
 
 ## 下一步
 
-1. 在實際單人關卡內重跑唯讀診斷，確認線上 guard 與角色／屬性鏈。
-2. 逐項執行可逆短時間寫入驗證，確認線上 guard、還原與實際遊戲效果後才將 profile 設為已驗證。
-3. 實際開箱驗證寶箱最高獎勵 patch，並完成其餘 WPF 頁籤的執行中視覺 QA。
+1. 對 2026-07-23 新版 GameAssembly／metadata 重新執行 Il2CppDumper，更新版本化解鎖 ID 與所有候選偏移；舊 Profile 必須保留。
+2. 在實際單人關卡內對新版 Profile 重跑唯讀診斷，確認線上 guard 與角色／屬性鏈。
+3. 逐項執行可逆短時間寫入驗證，確認線上 guard、還原與實際遊戲效果後才將新版 profile 設為已驗證。
+4. 實際開箱驗證寶箱最高獎勵 patch。
 
 ## 最新診斷紀錄（2026-07-22）
 
@@ -101,3 +102,14 @@
 - 受控驗證工具離線里程碑：全方案建置 0 警告／0 錯誤，16/16 測試通過。新增測試證明正式附加仍拒絕 `verified: false`，且開發驗證會拒絕錯誤 Profile ID、錯誤功能類型與超過 5 秒的要求。尚未執行任何受控寫入；必須等使用者進入單人關卡，唯讀確認 `onlineSession=0` 後才可逐項執行。
 - 發行內容重新稽核時，framework-dependent win-x64 第一份產物確認禁止檔與 PDB 均為 0，但缺少 `README.md` 與 `LICENSE`。修正後以全新輸出目錄重跑：必要檔 8/8、禁止檔 0、PDB 0，Release 建置 0 警告／0 錯誤且 16/16 測試通過。兩份文件與兩份版本 data 已明確設為輸出項目，並新增 Visual Studio `win-x64-folder` 發布 Profile；Profile 仍為 `verified: false`，不得對外宣稱 Trainer 可用。
 - 第一次實際改用 `win-x64-folder.pubxml` 發布時，App 本身沒有 PDB，但 Core／Memory 專案參考仍產生 2 個 PDB；原因是 `.pubxml` 的偵錯屬性只屬於 App，未全域傳遞。新增方案層級 `Directory.Build.props` 後，以第三個全新輸出目錄重測成功：必要檔 8/8、禁止檔 0、PDB 0，Release 0 警告／0 錯誤且 16/16 測試通過。再壓成測試 ZIP 後直接檢查 ZIP entries，必要檔、`data` 子目錄與 0 禁止檔／0 PDB 均保持正確；稽核產物只在已忽略的 `artifacts/`，尚未對外發布。
+
+## 新版遊戲事件（2026-07-23）
+
+- 使用者實際啟動修改器後顯示未知組合，畫面中的新指紋與唯讀重算一致。這不是附加 API 無回應，而是版本安全檢查拒絕舊偏移。
+- 新 `GameAssembly.dll`：174,786,048 bytes，SHA-256 `248617379e77e795b0b2f12328e2a86968730fa9ede997d62a66db70be158e3a`。
+- `UnityPlayer.dll` 未變：33,661,872 bytes，SHA-256 `4abd2ee6d6ca6176b3122a22cc0264ea0e3c1674bd2969621fe72decbf7b5134`。
+- 新 `global-metadata.dat`：49,067,568 bytes，SHA-256 `6e82e833185a101ba30f00216fe2bed0beb78aa339fa452f1f5268839ebeb257`。
+- 新版遊戲檔時間為 2026-07-23 09:59（Asia/Taipei）；新版 Profile 必須使用重新抽取的根 RVA，禁止把舊版偏移僅換雜湊後沿用。
+- Il2CppDumper v6.7.46 已對新版完成 metadata v31 dump，產物隔離在已忽略的 `dump/current-2026-07-23`；舊 `dump/current` 未覆蓋。工具忽略第三個輸出參數並先寫到 exe 目錄，已將五項新產物精確移至新版目錄，後續不要重複這個錯誤用法。
+- 新舊 dump 靜態比較：所有關鍵 TypeDef 與欄位 offset 不變，`TreasureFactory.MakePrizes` RVA 不變；`GM_TypeInfo` 唯一明確變動為 `160283072 -> 160283208`。兩段寶箱 expected bytes 經 PE RVA-to-raw 正確映射後都相符；曾有一次把 RVA 當 raw offset 而得到假性不符，已排除，禁止重複該讀法。
+- 已新增 `steam-current-2026-07-23` offsets／unlock Profile 並保留 2026-07-22 Profile。新版 unlock 只有 `TP_CHAOS` 從兩個角色陣列移除。新增 shipped-data 回歸，鎖定新版三檔指紋、GM 根 RVA、兩段寶箱 RVA／expected bytes、fail-closed 狀態與 `TP_CHAOS` 新舊差異。Debug／Release 均為 0 警告／0 錯誤、各 16/16 測試及 Release live read-only 全通過；目前遊戲未執行，尚不能做新版程序鏈診斷，`verified` 保持 false。

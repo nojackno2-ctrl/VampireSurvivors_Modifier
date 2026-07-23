@@ -342,7 +342,52 @@ internal static class Program
                 "PowerUp rank arrays must not be generated from unique enum IDs.");
         }
 
+        GameVersionProfile current = offsets.Profiles.Single(profile =>
+            profile.ProfileId == "steam-current-2026-07-23");
+        Equal(
+            "248617379e77e795b0b2f12328e2a86968730fa9ede997d62a66db70be158e3a",
+            current.GameAssemblySha256,
+            "Current GameAssembly fingerprint differs from the verified dump input.");
+        Equal(
+            "6e82e833185a101ba30f00216fe2bed0beb78aa339fa452f1f5268839ebeb257",
+            current.Il2CppMetadataSha256,
+            "Current metadata fingerprint differs from the verified dump input.");
+        True(!current.Verified, "The new game profile must stay fail-closed until in-run verification completes.");
+        Equal(160283208L, current.OnlineSession!.BaseOffset, "Current online guard uses the old GM_TypeInfo RVA.");
+        foreach ((string key, FeatureDefinition feature) in current.Features.Where(pair =>
+                     pair.Value.Kind == FeatureKind.Value
+                     && string.Equals(pair.Value.Address.Module, "GameAssembly.dll", StringComparison.OrdinalIgnoreCase)))
+        {
+            Equal(160283208L, feature.Address.BaseOffset, $"Current feature {key} uses the old GM_TypeInfo RVA.");
+        }
+
+        FeatureDefinition treasure = current.Features["maxTreasure"];
+        Equal(111042760L, treasure.Address.BaseOffset, "Current treasure primary patch RVA differs.");
+        Equal("8B 4B 18", treasure.ExpectedBytes, "Current treasure primary expected bytes differ.");
+        Equal(1, treasure.AdditionalPatches.Count, "Current treasure composite patch segment count differs.");
+        Equal(111044288L, treasure.AdditionalPatches[0].Address.BaseOffset, "Current treasure secondary patch RVA differs.");
+        Equal("F3 0F 2C 47 48", treasure.AdditionalPatches[0].ExpectedBytes,
+            "Current treasure secondary expected bytes differ.");
+
+        UnlockCatalogProfile oldUnlocks = unlocks.FindByProfileId("steam-current-2026-07-22")
+            ?? throw new InvalidOperationException("Missing retained 2026-07-22 unlock profile.");
+        UnlockCatalogProfile currentUnlocks = unlocks.FindByProfileId(current.ProfileId)
+            ?? throw new InvalidOperationException("Missing current unlock profile.");
+        True(ContainsString(oldUnlocks.Arrays["BoughtCharacters"], "TP_CHAOS"),
+            "The retained old unlock profile must preserve TP_CHAOS.");
+        True(!ContainsString(currentUnlocks.Arrays["BoughtCharacters"], "TP_CHAOS")
+            && !ContainsString(currentUnlocks.Arrays["UnlockedCharacters"], "TP_CHAOS"),
+            "The current unlock profile must reflect removal of TP_CHAOS.");
+
         return Task.CompletedTask;
+    }
+
+    private static bool ContainsString(JsonNode? node, string value)
+    {
+        return node is JsonArray array && array.Any(item =>
+            item is JsonValue jsonValue
+            && jsonValue.TryGetValue(out string? itemValue)
+            && string.Equals(itemValue, value, StringComparison.Ordinal));
     }
 
     private static Task TestUnlockCatalogMerge()
