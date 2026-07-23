@@ -13,7 +13,7 @@
 - `TreasureFactory.MakePrizes` RVA 仍為 `0x69E5DE0`。依 PE section table 將兩段 runtime RVA 映射回 raw offset 後，新 DLL 的 `0x69E60C8` 仍為 `8B 4B 18`，`0x69E66C0` 仍為 `F3 0F 2C 47 48`；候選 patch 與 expected bytes 因此可保留，但仍須實際開箱驗證。
 - `UnityPlayer.dll` 未變，`gameSpeed` 唯一 AOB 可沿用；仍須在實際程序重新確認唯一命中與時間倍率效果。
 - 重新抽取的解鎖表只有角色 ID `TP_CHAOS` 從 `BoughtCharacters`／`UnlockedCharacters` 移除，其餘 9 組 ID 陣列沒有集合差異。
-- Debug 全方案建置 0 警告／0 錯誤，16/16 測試通過；live read-only 已證明新三檔 Profile 與新解鎖 Profile 同時精確命中。尚未在單人關卡讀寫記憶體。
+- Debug／Release 全方案建置 0 警告／0 錯誤，17/17 測試通過；live read-only 已證明新三檔 Profile 與新解鎖 Profile 同時精確命中。修改器會依 `offsets.json` 內容 SHA-256 自動偵測 Profile 更新，支援手動重新偵測，正式附加前也會重算遊戲三檔指紋；尚未在單人關卡讀寫記憶體。
 
 ## 先前 Steam 版（2026-07-22 擷取）
 
