@@ -61,6 +61,7 @@ internal static class Program
             ("reversible memory patch", TestMemoryPatch),
             ("atomic composite memory patch", TestMemoryPatchSet),
             ("offset catalog parsing", TestOffsetCatalog),
+            ("offset catalog live reload detection", TestOffsetCatalogLiveReload),
             ("trainer verification policy", TestTrainerVerificationPolicy),
             ("value lock enforcement", TestValueLockService)
         ];
@@ -683,6 +684,41 @@ internal static class Program
                 }
                 """, Utf8WithoutBom);
             Throws<InvalidDataException>(() => OffsetCatalog.Load(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static Task TestOffsetCatalogLiveReload()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), $"VSModifierTests_{Guid.NewGuid():N}");
+        string path = Path.Combine(directory, "offsets.json");
+        Directory.CreateDirectory(directory);
+        try
+        {
+            File.WriteAllText(path, """{"schemaVersion":2,"profiles":[]}""");
+            OffsetCatalogFile catalogFile = new(path);
+            True(catalogFile.HasChanged(), "A catalog that has never been loaded should require reload.");
+
+            OffsetCatalog first = catalogFile.Reload();
+            Equal(0, first.Profiles.Count, "Initial catalog profile count differs.");
+            True(!catalogFile.HasChanged(), "Catalog should be unchanged immediately after reload.");
+
+            File.WriteAllText(path, """{"schemaVersion":2,"profiles":[],"revision":"future"}""");
+            True(catalogFile.HasChanged(), "Changed catalog content was not detected.");
+
+            OffsetCatalog second = catalogFile.Reload();
+            Equal(0, second.Profiles.Count, "Reloaded catalog profile count differs.");
+            True(!catalogFile.HasChanged(), "Reloaded catalog should become the observed version.");
+
+            File.WriteAllText(path, """{"schemaVersion":999,"profiles":[]}""");
+            True(catalogFile.HasChanged(), "Invalid replacement catalog was not detected.");
+            Throws<InvalidDataException>(() => catalogFile.Reload());
+            True(!catalogFile.HasChanged(), "Rejected catalog should not be retried every timer tick until the file changes again.");
         }
         finally
         {
