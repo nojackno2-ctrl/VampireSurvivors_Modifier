@@ -370,6 +370,8 @@
                                 <TextBlock Grid.Row="2" Text="Trainer 狀態" Foreground="#94A3B8" Margin="0,5" />
                                 <TextBlock x:Name="TrainerStatusText" Grid.Row="2" Grid.Column="1" Margin="0,5" TextWrapping="Wrap" />
                                 <StackPanel Grid.Column="2" Grid.RowSpan="3" Orientation="Vertical" VerticalAlignment="Center">
+                                    <Button x:Name="RefreshTrainerProfileButton" Content="重新偵測版本"
+                                            Click="RefreshTrainerProfileButton_Click" />
                                     <Button x:Name="AttachTrainerButton" Content="附加遊戲" Click="AttachTrainerButton_Click" IsEnabled="False" />
                                     <Button x:Name="DetachTrainerButton" Content="中斷並還原" Click="DetachTrainerButton_Click" IsEnabled="False" />
                                 </StackPanel>
@@ -425,6 +427,69 @@
                                     <TextBlock Text="勾選後以 100ms 間隔維持調整值；倍率項使用原始值 × 輸入值，標示「+」者使用原始值 + 輸入值。取消勾選會還原原始值。"
                                                Foreground="#94A3B8" TextWrapping="Wrap" Margin="8" />
                                     <UniformGrid x:Name="TrainerAttributePanel" Columns="2" />
+                                </StackPanel>
+                            </GroupBox>
+                            <GroupBox Header="即時數值（單次讀寫）">
+                                <Grid Margin="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="160" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="本局金幣" VerticalAlignment="Center" />
+                                    <TextBox x:Name="RuntimeCoinsTextBox" Grid.Column="1" Text="0" />
+                                    <Button x:Name="ReadRuntimeCoinsButton" Grid.Column="2" Content="讀取" Tag="coins"
+                                            Click="TrainerNumericReadButton_Click" />
+                                    <Button x:Name="WriteRuntimeCoinsButton" Grid.Column="3" Content="設定" Tag="coins"
+                                            Click="TrainerNumericWriteButton_Click" />
+                                    <TextBlock Grid.Column="4" Text="0–999,999,999" Foreground="#94A3B8" VerticalAlignment="Center" />
+
+                                    <TextBlock Grid.Row="1" Text="角色等級" VerticalAlignment="Center" />
+                                    <TextBox x:Name="RuntimeLevelTextBox" Grid.Row="1" Grid.Column="1" Text="1" />
+                                    <Button x:Name="ReadRuntimeLevelButton" Grid.Row="1" Grid.Column="2" Content="讀取" Tag="level"
+                                            Click="TrainerNumericReadButton_Click" />
+                                    <Button x:Name="WriteRuntimeLevelButton" Grid.Row="1" Grid.Column="3" Content="設定" Tag="level"
+                                            Click="TrainerNumericWriteButton_Click" />
+                                    <TextBlock Grid.Row="1" Grid.Column="4" Text="1–10,000" Foreground="#94A3B8" VerticalAlignment="Center" />
+
+                                    <TextBlock Grid.Row="2" Text="目前經驗值" VerticalAlignment="Center" />
+                                    <TextBox x:Name="RuntimeExperienceTextBox" Grid.Row="2" Grid.Column="1" Text="0" />
+                                    <Button x:Name="ReadRuntimeExperienceButton" Grid.Row="2" Grid.Column="2" Content="讀取" Tag="experience"
+                                            Click="TrainerNumericReadButton_Click" />
+                                    <Button x:Name="WriteRuntimeExperienceButton" Grid.Row="2" Grid.Column="3" Content="設定" Tag="experience"
+                                            Click="TrainerNumericWriteButton_Click" />
+                                    <TextBlock Grid.Row="2" Grid.Column="4" Text="0–999,999,999" Foreground="#94A3B8" VerticalAlignment="Center" />
+                                </Grid>
+                            </GroupBox>
+                            <GroupBox Header="升級與重複裝備">
+                                <StackPanel Margin="8">
+                                    <TextBlock Text="強制升級選項只改寫下一次升級頁面候選；重複按鈕只解除下一次新增裝備的重複檢查。所有 hook 會在中斷時還原。"
+                                               Foreground="#94A3B8" TextWrapping="Wrap" Margin="4" />
+                                    <Grid Margin="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="220" />
+                                            <ColumnDefinition Width="360" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <CheckBox x:Name="ForceLevelUpItemCheckBox" Content="強制下一次升級候選"
+                                                  Click="ForceLevelUpItemCheckBox_Click" />
+                                        <ComboBox x:Name="ForceLevelUpItemComboBox" Grid.Column="1"
+                                                  DisplayMemberPath="DisplayName"
+                                                  SelectionChanged="ForceLevelUpItemComboBox_SelectionChanged" />
+                                    </Grid>
+                                    <StackPanel Orientation="Horizontal" Margin="4">
+                                        <Button x:Name="DuplicateNextWeaponButton" Content="允許下一把重複武器"
+                                                Tag="duplicateNextWeapon" Click="DuplicateNextButton_Click" />
+                                        <Button x:Name="DuplicateNextAccessoryButton" Content="允許下一個重複配件"
+                                                Tag="duplicateNextAccessory" Click="DuplicateNextButton_Click" />
+                                    </StackPanel>
                                 </StackPanel>
                             </GroupBox>
                         </StackPanel>
