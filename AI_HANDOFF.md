@@ -1,5 +1,26 @@
 # AI Handoff
 
+## 熱路徑與程式碼結構優化（2026-07-27）
+
+- 線上防護改為鎖服務的共用前置 guard：`ValueLockService` 新增 `guard`／`guardKey`，每個 100ms 週期在所有鎖之前只跑一次 `EnsureOffline`，`Set` 也在寫入前先跑一次。原本每個鎖的委派各自呼叫 `EnsureOffline`，安全檢查成本隨啟用功能數線性成長（23 項功能 = 每秒 230 次指標鏈解析）。
+- 防護語意同時變強而非變弱：guard 保證排在同一週期的任何寫入之前；fail-closed 後新增 `_faulted`，該週期剩餘的鎖立即停止列舉，並拒絕再 `Set` 新鎖。附加當下就先跑一次 `EnsureOffline`，線上時直接拒絕建立工作階段（先前要等第一個 tick）。
+- `ProcessMemorySession` 新增模組資訊快取。先前每次 `Resolve` 都列舉整份行程模組表（Unity 遊戲數百個模組），且 UI 每秒的 `IsAttached` 會 `Process.Refresh()` 使 `Process.Modules` 內部快取失效，因此無法靠 BCL 自身快取。
+- 消除熱路徑配置：`IMemoryAccessor` 新增 span 版 `ReadBytes`（預設實作沿用陣列版，既有實作不受影響），`ReadProcessMemory`／`WriteProcessMemory` 改為 `ref byte`／`in byte`（不需 `/unsafe`），`WriteCore` 不再 `ToArray()`，`Read<T>` 與 preserveZero 檢查改用 stackalloc；鎖迴圈也不再每 tick `ToArray()` 整份字典。
+- `TrainerSession` 三個 `Enable*Lock` 合併為 `EnableComputedLock`（差異只有目標值算式與是否尊重 `PreserveZero`），hook 啟用／失敗清理合併為 `ArmHook`，`ReadValueForVerification` 併入 `ReadValue`。行為與例外型別維持不變。
+- WPF：狀態列筆刷改為凍結後共用的靜態 `Brush`，遊戲狀態只在真的變動時才寫回控制項；`OffsetCatalogFile.HasChanged` 先比對 `LastWriteTimeUtc`／`Length`，戳記變動時才讀檔並以 SHA-256 定案（雜湊仍是最終判準，`Reload` 失敗仍記錄戳記，維持不重試語意）。
+- 驗證：Debug／Release 全方案皆 0 警告／0 錯誤；測試由 20 增為 23 項，Debug 與 Release 各連跑 3 次皆 23/23；Release live read-only 仍為 1 個有效 SaveData、154 欄位、Profile 命中且 `verified: false`，全程無寫入。
+- 新增回歸：`shared safety guard runs once per tick`（guard 先於首次寫入、每週期只跑一次、失敗後所有鎖停止且拒絕新 `Set`）、`online session blocks trainer attach`、`native process memory round trip`（以測試行程自身的 pinned buffer 實際走一次 `ReadProcessMemory`／`WriteProcessMemory`，涵蓋新的 P/Invoke 簽章與模組快取，不需遊戲執行）。
+- 尚未驗證：本輪期間 VampireSurvivors 未執行，因此新的 guard 路徑與模組快取沒有對實際遊戲行程重跑 `--inspect-trainer-read-only`。Profile 仍為 `verified: false`；下次遊戲執行時應先重跑該唯讀診斷確認仍為 24/24。
+
+## Wand／WeMod 行為重建整合里程碑（2026-07-26）
+
+- 已以 clean-room 方式從執行期行為確認目前 2026-07-23 `GameAssembly.dll` 的三個 hook 目標；專案未加入對方 DLL、腳本、memory dump、載入器或授權／帳號資料。
+- 新增可逆 x64 rel32 hook 基礎設施：目標附近 `VirtualAllocEx` code cave、expected-bytes fail-closed、payload／跳躍讀回驗證、先還原目標指令再釋放 cave；安全停止與 Detach 都會還原。
+- 新增 `forceLevelUpItem`（RVA `0x6FFEA09`）、`duplicateNextWeapon`（RVA `0x6A3461A`）、`duplicateNextAccessory`（RVA `0x7B4A98A`），只放入 2026-07-23 Profile，舊 Profile 未套用未證實位址。
+- 新增本局金幣、角色等級、經驗值單次讀寫，以及 85 項升級道具 ID 清單與 WPF 操作介面；Profile 仍維持 `verified: false`，在完成新功能單人關卡實機驗證前正式 UI 仍 fail-closed。
+- 修正數值鎖取消時重新解析指標的風險：現在保存實際位址與原始 bytes，只還原當初捕捉的同一地址；單次寫入包含範圍檢查、離線 guard、讀回驗證與失敗 rollback。
+- 2026-07-26 Debug 建置成功，0 warnings／0 errors；完整測試 20/20，包含 payload 分支目的地、五位元組 guard skip、code cave 釋放、原始指令還原與指標換址不誤寫。
+
 ## 目前目標
 
 依 `DESIGN.md` 完成 C# WPF Vampire Survivors 修改器，包含存檔修改器與外部記憶體 Trainer，且不修改遊戲安裝檔案。
@@ -118,3 +139,16 @@
 - 第二次 Debug 建置揭露測試誤用了不存在的 `CreateTemporaryDirectory`／`False` 輔助函式，且先前 UI QA 啟動的 VSModifier PID 4308 鎖住 Debug Core／Memory DLL。測試已改用本專案既有的 GUID 暫存目錄與 `True(!condition)` 慣例；PID 4308 路徑已再次確認為本專案 Debug App，後續採正常關閉視窗後重測。
 - 已修正舊行程永久沿用啟動時 Profile 的問題：`OffsetCatalogFile` 以 offsets 內容 SHA-256 偵測變更，未附加時由 1 秒狀態計時器自動重讀；Trainer 頁新增「重新偵測版本」，頂端「重新載入」也會重讀 Profile，且每次正式附加前再重算三檔指紋。重讀開始即清除既有 Profile／catalog，錯誤或未驗證版本一律 fail-closed；UI 會顯示 Profile ID，並明確區分未知版本、尚未實機驗證與按鈕故障。
 - 熱重新載入里程碑驗證：先前 Debug App PID 4308 已用 `CloseMainWindow` 正常結束，未強制終止；Debug／Release 全方案皆 0 警告／0 錯誤，新增 catalog 內容變更、重讀與無效版本抑制回歸後共 17/17 測試通過。Release live read-only 再次確認 1 個有效 SaveData、154 個欄位、1 個完整安裝、新 offsets／unlock Profile 命中且 `verified: false`，全程無寫入。以 `win-x64-folder` 發布到全新忽略目錄後，新 offsets／unlock Profile 各 1、PDB 0、禁止檔 0。
+- 使用者重新啟動新版 Debug App 後，WPF 已正確顯示 `steam-current-2026-07-23`、三檔短雜湊與「尚未完成單人關卡實機驗證」，證明版本熱重新載入／新版 data 已生效。當時 VampireSurvivors PID 11524 與 VSModifier.App PID 39504 同時執行；隨即執行 `--inspect-trainer-read-only`，仍只有 `gameSpeed=1` 與 `maxTreasure` 原始位元組可讀，`onlineSession` 及其餘 22 條 GM 鏈全部在第 3 層得到 null（2/24）。這是尚未真正進入可移動、計時器已開始的單人關卡，不得進行任何受控寫入。
+- 在遊戲行程持續存在時第二次重跑同一唯讀診斷，結果仍精確為 2/24，所有 GM 鏈同樣在第 3 層 null；因此不是首次診斷時的短暫載入競態。下一步仍需使用者實際開始單人戰局並讓角色／計時器運作後再讀，guard 可解析前禁止受控寫入。
+- 使用者進入角色可移動、計時器運作的單人關卡後，第三次唯讀診斷成功：`onlineSession=0`，23 個數值功能與 `maxTreasure` patch 全部解析，合計 24/24。所有讀值均在 Profile 合理範圍內。
+- 已用開發受控路徑逐項驗證全部 23 個數值功能；每次只啟用一項 250ms，100ms 線上 guard 持續運作，工具均讀回不同 applied 值後精確還原原值。移速原值 1.9 首次乘 1.01 被 Profile 上限夾回同值，因此另以 set 1.8 重測，取得 `1.9 -> 1.8 -> 1.9` 的實際變更證據，不能把第一次夾值當成有效寫入證據。
+- `maxTreasure` 兩段 code patch 也以 250ms 原子流程完成實際程序驗證：expected bytes 命中、兩段 patch bytes 讀回成功、逆序還原原始 bytes 成功（`appliedBytes=True; restoredBytes=True`）。全部可逆驗證後再跑 24/24 唯讀掃描仍全通過且 `onlineSession=0`，無敵／快速寶箱回到 0、遊戲速率回到 2，沒有留下受控驗證鎖或 patch。尚缺使用者目視的實際遊戲效果，尤其最高寶箱必須在 5 秒 patch 視窗內開箱並記錄結果；Profile 仍保持 `verified: false`。
+
+## Wand／WeMod Trainer 乾淨室分析（2026-07-23）
+
+- 使用者要求分析本機 Wand／WeMod 的 Vampire Survivors Trainer 並把修改行為重作進本專案；不得複製或散布對方 DLL，也不得因此放寬本專案的禁注入、單機限定與線上 fail-closed 規格。
+- 本機 Trainer `Trainer_48760_b3963c0c6f.dll` 為 x64 packed DLL，SHA-256 `b3963c0c6f8811d0736b6e0c6d042e479dc6aea11fd71719e744397529c96469`。已唯讀辨識 `.boot` 的 aPLib fast 解壓 stub，第一層輸出只放在系統暫存目錄，仍有第二層虛擬化／加密；沒有執行或加入 repo。
+- 從本機 Chromium LevelDB 精確讀出 trainer `48760` blueprint：loader 為 `trainerlib`，共有 15 項；現有重疊功能之外，新增目標為 `set_coins`、`set_level`、`set_experience`、`force_item_on_level_up`、`choose_item_to_force`、`force_duplicate_next_weapon`、`force_duplicate_next_accessory`。其中設金幣要求先進一次 Power Ups 頁，兩個 duplicate 是只作用下一次的 button。
+- Electron loader 程式碼證實其新舊後端都採 DLL 注入／remote thread；Trainer 變數名稱會傳入注入後的 DLL。這個載入方法不可搬進本專案，後續只擷取行為與遊戲端 target，再以外部 RPM/WPM/AOB/code patch 乾淨室重作。
+- 本輪開始前重新驗證 Debug 全方案 0 警告／0 錯誤、17/17 測試通過。已安裝 x64dbg 2026.05.27；僅在已忽略的 `artifacts/research/` 建立 CELib 呼叫參數擷取腳本，準備做單機動態觀察。
