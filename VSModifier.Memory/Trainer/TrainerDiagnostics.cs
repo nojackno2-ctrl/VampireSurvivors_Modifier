@@ -35,7 +35,7 @@ public static class TrainerDiagnostics
         List<DiagnosticValue> features = [];
         foreach ((string key, FeatureDefinition feature) in profile.Features.OrderBy(pair => pair.Key, StringComparer.Ordinal))
         {
-            if (feature.Kind == FeatureKind.Patch)
+            if (feature.Kind is FeatureKind.Patch or FeatureKind.Hook)
             {
                 features.Add(ReadBytes(memory, key, feature));
             }

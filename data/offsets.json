@@ -16,6 +16,9 @@
       "features": {
         "invulnerability": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 844] } },
         "quickTreasure": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 144, 80, 345] } },
+        "coins": { "kind": "value", "valueType": "float", "minValue": 0, "maxValue": 999999999, "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 144, 80, 148] } },
+        "level": { "kind": "value", "valueType": "int32", "minValue": 1, "maxValue": 10000, "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 556] } },
+        "experience": { "kind": "value", "valueType": "float", "minValue": 0, "maxValue": 999999999, "address": { "module": "GameAssembly.dll", "baseOffset": 160283072, "pointerOffsets": [0, 184, 0, 720, 16, 32, 572] } },
         "maxTreasure": {
           "kind": "patch",
           "address": { "module": "GameAssembly.dll", "baseOffset": 111042760 },
@@ -67,6 +70,24 @@
       "features": {
         "invulnerability": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283208, "pointerOffsets": [0, 184, 0, 720, 16, 32, 844] } },
         "quickTreasure": { "kind": "value", "valueType": "boolean", "address": { "module": "GameAssembly.dll", "baseOffset": 160283208, "pointerOffsets": [0, 184, 0, 144, 80, 345] } },
+        "coins": { "kind": "value", "valueType": "float", "minValue": 0, "maxValue": 999999999, "address": { "module": "GameAssembly.dll", "baseOffset": 160283208, "pointerOffsets": [0, 184, 0, 144, 80, 148] } },
+        "level": { "kind": "value", "valueType": "int32", "minValue": 1, "maxValue": 10000, "address": { "module": "GameAssembly.dll", "baseOffset": 160283208, "pointerOffsets": [0, 184, 0, 720, 16, 32, 556] } },
+        "experience": { "kind": "value", "valueType": "float", "minValue": 0, "maxValue": 999999999, "address": { "module": "GameAssembly.dll", "baseOffset": 160283208, "pointerOffsets": [0, 184, 0, 720, 16, 32, 572] } },
+        "forceLevelUpItem": {
+          "kind": "hook",
+          "address": { "module": "GameAssembly.dll", "baseOffset": 117434889 },
+          "expectedBytes": "48 89 83 30 02 00 00"
+        },
+        "duplicateNextWeapon": {
+          "kind": "hook",
+          "address": { "module": "GameAssembly.dll", "baseOffset": 111363610 },
+          "expectedBytes": "45 33 C9 45 33 C0 8B D6"
+        },
+        "duplicateNextAccessory": {
+          "kind": "hook",
+          "address": { "module": "GameAssembly.dll", "baseOffset": 129280394 },
+          "expectedBytes": "45 33 C9 45 33 C0 41 8B D4"
+        },
         "maxTreasure": {
           "kind": "patch",
           "address": { "module": "GameAssembly.dll", "baseOffset": 111042760 },

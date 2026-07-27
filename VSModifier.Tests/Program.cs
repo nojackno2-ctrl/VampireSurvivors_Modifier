@@ -1,3 +1,5 @@
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Globalization;
 using System.Text;
@@ -35,6 +37,11 @@ internal static class Program
             return RunTimeScaleReadOnlyInspection();
         }
 
+        if (args.Length == 2 && args[0].Equals("--inspect-trainer-chain", StringComparison.OrdinalIgnoreCase))
+        {
+            return RunTrainerChainInspection(args[1]);
+        }
+
         if (args.Length > 0 && args[0].Equals("--verify-trainer-value", StringComparison.OrdinalIgnoreCase))
         {
             return await RunTrainerValueVerification(args);
@@ -43,6 +50,16 @@ internal static class Program
         if (args.Length > 0 && args[0].Equals("--verify-trainer-patch", StringComparison.OrdinalIgnoreCase))
         {
             return await RunTrainerPatchVerification(args);
+        }
+
+        if (args.Length > 0 && args[0].Equals("--verify-trainer-hook", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunTrainerHookVerification(args);
+        }
+
+        if (args.Length > 0 && args[0].Equals("--verify-force-item-behavior", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunForcedItemBehaviorVerification(args);
         }
 
         (string Name, Func<Task> Run)[] tests =
@@ -60,10 +77,16 @@ internal static class Program
             ("profile AOB RIP-relative resolution", TestProfileAobResolution),
             ("reversible memory patch", TestMemoryPatch),
             ("atomic composite memory patch", TestMemoryPatchSet),
+            ("x64 trainer hook payloads", TestTrainerHookPayloads),
+            ("reversible remote code hook", TestRemoteCodeHook),
             ("offset catalog parsing", TestOffsetCatalog),
             ("offset catalog live reload detection", TestOffsetCatalogLiveReload),
             ("trainer verification policy", TestTrainerVerificationPolicy),
-            ("value lock enforcement", TestValueLockService)
+            ("trainer same-address restoration and one-shot values", TestTrainerValueSafety),
+            ("value lock enforcement", TestValueLockService),
+            ("shared safety guard runs once per tick", TestValueLockSharedGuard),
+            ("online session blocks trainer attach", TestTrainerRejectsOnlineSession),
+            ("native process memory round trip", TestProcessMemoryRoundTrip)
         ];
 
         int failures = 0;
@@ -159,6 +182,56 @@ internal static class Program
         return getter != 0 && setter != 0 ? 0 : 1;
     }
 
+    private static int RunTrainerChainInspection(string featureKey)
+    {
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            installation.GameAssemblyPath,
+            installation.UnityPlayerPath,
+            installation.MetadataPath);
+        GameVersionProfile profile = catalog.Match(fingerprint).Profile
+            ?? throw new InvalidOperationException("目前遊戲版本沒有匹配的 Profile。");
+        FeatureDefinition feature = profile.Features.TryGetValue(featureKey, out FeatureDefinition? found)
+            ? found
+            : throw new KeyNotFoundException($"Profile 沒有功能 {featureKey}。");
+
+        using ProcessMemorySession memory = ProcessMemorySession.AttachReadOnly();
+        ProcessModuleInfo module = memory.GetModuleInfo(feature.Address.Module);
+        nint current = module.BaseAddress + checked((nint)feature.Address.BaseOffset);
+        Console.WriteLine($"{featureKey}: root=0x{current:X} ({feature.Address.Module}+0x{feature.Address.BaseOffset:X})");
+        for (int index = 0; index < feature.Address.PointerOffsets.Count - 1; index++)
+        {
+            long offset = feature.Address.PointerOffsets[index];
+            nint pointerAddress = current + checked((nint)offset);
+            nint next = memory.Read<nint>(pointerAddress);
+            Console.WriteLine($"[{index}] [0x{pointerAddress:X}] (+0x{offset:X}) -> 0x{next:X}");
+            if (next == 0)
+            {
+                return 1;
+            }
+
+            current = next;
+        }
+
+        long finalOffset = feature.Address.PointerOffsets.Count == 0
+            ? 0
+            : feature.Address.PointerOffsets[^1];
+        nint resolved = current + checked((nint)finalOffset);
+        byte[] raw = memory.ReadBytes(resolved - 32, 68);
+        Console.WriteLine($"resolved=0x{resolved:X}; finalOffset=0x{finalOffset:X}");
+        for (int offset = -32; offset <= 32; offset += 4)
+        {
+            int rawOffset = offset + 32;
+            byte[] bytes = raw.AsSpan(rawOffset, 4).ToArray();
+            Console.WriteLine(
+                $"{offset,4:+#;-#;0}: {Convert.ToHexString(bytes)} "
+                + $"int32={BitConverter.ToInt32(bytes)} float={BitConverter.ToSingle(bytes):R}");
+        }
+
+        return 0;
+    }
+
     private static async Task<int> RunTrainerValueVerification(string[] args)
     {
         if (args.Length != 6
@@ -215,6 +288,72 @@ internal static class Program
         return 0;
     }
 
+    private static async Task<int> RunTrainerHookVerification(string[] args)
+    {
+        if ((args.Length != 4 && args.Length != 5)
+            || !int.TryParse(args[3], NumberStyles.None, CultureInfo.InvariantCulture, out int durationMilliseconds)
+            || args.Length == 5
+                && !int.TryParse(args[4], NumberStyles.None, CultureInfo.InvariantCulture, out _))
+        {
+            Console.Error.WriteLine(
+                "Usage: --verify-trainer-hook <profile-id> <feature-key> <duration-ms> [forced-item-id]");
+            return 2;
+        }
+
+        int forcedItemId = args.Length == 5
+            ? int.Parse(args[4], CultureInfo.InvariantCulture)
+            : 1;
+        Console.WriteLine(
+            "DEV ONLY: 將只驗證一個 hook，最長 5 秒；線上 guard 必須解析為 0，結束時會還原原始指令並釋放 code cave。");
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        HookVerificationResult result = await TrainerVerificationRunner.VerifyHookAsync(
+            catalog,
+            installation.GameAssemblyPath,
+            installation.UnityPlayerPath,
+            installation.MetadataPath,
+            args[1],
+            args[2],
+            TimeSpan.FromMilliseconds(durationMilliseconds),
+            forcedItemId);
+        Console.WriteLine(
+            $"PASS  profile={result.ProfileId}; feature={result.FeatureKey}; durationMs={result.Duration.TotalMilliseconds:R}");
+        Console.WriteLine(
+            $"PASS  installedJump={result.InstalledJumpMatched}; restoredBytes={result.RestoredBytesMatched}");
+        return 0;
+    }
+
+    private static async Task<int> RunForcedItemBehaviorVerification(string[] args)
+    {
+        if (args.Length != 4
+            || !int.TryParse(args[2], NumberStyles.None, CultureInfo.InvariantCulture, out int itemId)
+            || !int.TryParse(args[3], NumberStyles.None, CultureInfo.InvariantCulture, out int durationMilliseconds))
+        {
+            Console.Error.WriteLine(
+                "Usage: --verify-force-item-behavior <profile-id> <item-id> <duration-ms>");
+            return 2;
+        }
+
+        Console.WriteLine(
+            "DEV ONLY: 單人行為觀察期間會維持無敵與指定升級道具，最長 30 秒；線上 guard 失敗時立即還原。");
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        ForcedItemBehaviorVerificationResult result =
+            await TrainerVerificationRunner.VerifyForcedItemBehaviorAsync(
+                catalog,
+                installation.GameAssemblyPath,
+                installation.UnityPlayerPath,
+                installation.MetadataPath,
+                args[1],
+                itemId,
+                TimeSpan.FromMilliseconds(durationMilliseconds));
+        Console.WriteLine(
+            $"PASS  profile={result.ProfileId}; itemId={result.ItemId}; durationMs={result.Duration.TotalMilliseconds:R}");
+        Console.WriteLine(
+            $"PASS  installedJump={result.InstalledJumpMatched}; restoredBytes={result.RestoredBytesMatched}");
+        return 0;
+    }
+
     private static GameInstallation GetCurrentGameInstallation()
     {
         return new GameInstallationLocator().FindInstallations().FirstOrDefault()
@@ -245,7 +384,8 @@ internal static class Program
         string detail = value.Success
             ? value.Value.HasValue ? $"value={value.Value.Value:R}" : "bytes readable"
             : $"error={value.Error}";
-        Console.WriteLine($"{(value.Success ? "PASS" : "WAIT")}  {value.Key}: {detail}");
+        string address = value.Address == 0 ? string.Empty : $" address=0x{value.Address:X};";
+        Console.WriteLine($"{(value.Success ? "PASS" : "WAIT")}  {value.Key}:{address} {detail}");
     }
 
     private static Task TestChecksum()
@@ -329,7 +469,12 @@ internal static class Program
     {
         OffsetCatalog offsets = OffsetCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
         UnlockCatalog unlocks = UnlockCatalog.Load(Path.Combine(AppContext.BaseDirectory, "data", "ids", "unlocks.json"));
+        ForcedItemCatalog forcedItems = ForcedItemCatalog.Load(
+            Path.Combine(AppContext.BaseDirectory, "data", "ids", "forced-level-up-items.json"));
         True(offsets.Profiles.Count > 0, "At least one shipped game version profile is required.");
+        Equal(85, forcedItems.Items.Count, "Forced level-up item catalog count differs.");
+        Equal("Magic Wand", forcedItems.Items.Single(item => item.Id == 1).Name, "Forced item ID 1 differs.");
+        Equal("Profusione D'Amore", forcedItems.Items.Single(item => item.Id == 155).Name, "Forced item ID 155 differs.");
         foreach (GameVersionProfile gameProfile in offsets.Profiles)
         {
             UnlockCatalogProfile unlockProfile = unlocks.FindByProfileId(gameProfile.ProfileId)
@@ -369,6 +514,21 @@ internal static class Program
         Equal(111044288L, treasure.AdditionalPatches[0].Address.BaseOffset, "Current treasure secondary patch RVA differs.");
         Equal("F3 0F 2C 47 48", treasure.AdditionalPatches[0].ExpectedBytes,
             "Current treasure secondary expected bytes differ.");
+        Equal(117434889L, current.Features["forceLevelUpItem"].Address.BaseOffset,
+            "Forced level-up hook RVA differs.");
+        Equal("48 89 83 30 02 00 00", current.Features["forceLevelUpItem"].ExpectedBytes,
+            "Forced level-up hook expected bytes differ.");
+        Equal(111363610L, current.Features["duplicateNextWeapon"].Address.BaseOffset,
+            "Duplicate weapon hook RVA differs.");
+        Equal(129280394L, current.Features["duplicateNextAccessory"].Address.BaseOffset,
+            "Duplicate accessory hook RVA differs.");
+        True(current.Features["forceLevelUpItem"].Kind == FeatureKind.Hook
+            && current.Features["duplicateNextWeapon"].Kind == FeatureKind.Hook
+            && current.Features["duplicateNextAccessory"].Kind == FeatureKind.Hook,
+            "Current trainer hook features must use FeatureKind.Hook.");
+        True(offsets.Profiles.Single(profile => profile.ProfileId == "steam-current-2026-07-22")
+                .Features.Values.All(feature => feature.Kind != FeatureKind.Hook),
+            "Current-build hook RVAs must not be copied into the retained old profile.");
 
         UnlockCatalogProfile oldUnlocks = unlocks.FindByProfileId("steam-current-2026-07-22")
             ?? throw new InvalidOperationException("Missing retained 2026-07-22 unlock profile.");
@@ -607,6 +767,80 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static Task TestTrainerHookPayloads()
+    {
+        nint cave = (nint)0x1200;
+        nint forceTarget = (nint)0x1010;
+        byte[] forceOriginal = [0x48, 0x89, 0x83, 0x30, 0x02, 0x00, 0x00];
+        RemoteHookPayload force = TrainerHookPayloadFactory.CreateForcedLevelUpItem(
+            cave,
+            forceTarget,
+            forceOriginal);
+        Equal(0, BitConverter.ToInt32(force.Code, force.DataOffsets[TrainerHookPayloadFactory.ItemId]),
+            "Forced-item payload must start with item ID zero.");
+        Equal((byte)0, force.Code[force.DataOffsets[TrainerHookPayloadFactory.EnabledFlag]],
+            "Forced-item payload must start disabled.");
+        int originalOffset = force.Code.AsSpan().IndexOf(forceOriginal);
+        True(originalOffset >= 0, "Forced-item payload does not replay the overwritten instructions.");
+        int returnJump = originalOffset + forceOriginal.Length;
+        Equal((byte)0xE9, force.Code[returnJump], "Forced-item payload is missing its return jump.");
+        Equal(
+            forceTarget + forceOriginal.Length,
+            DecodeRelativeDestination(force.Code, cave, returnJump),
+            "Forced-item payload returns to the wrong instruction.");
+
+        nint duplicateTarget = (nint)0x1050;
+        byte[] duplicateOriginal = [0x45, 0x33, 0xC9, 0x45, 0x33, 0xC0, 0x8B, 0xD6];
+        RemoteHookPayload duplicate = TrainerHookPayloadFactory.CreateDuplicateNext(
+            cave,
+            duplicateTarget,
+            duplicateOriginal);
+        True(duplicate.Code.AsSpan(0, duplicateOriginal.Length).SequenceEqual(duplicateOriginal),
+            "Duplicate payload must replay the overwritten setup instructions first.");
+        int xorOffset = duplicate.Code.AsSpan().IndexOf(new byte[] { 0x48, 0x31, 0xC0, 0xE9 });
+        True(xorOffset >= 0, "Duplicate payload is missing its one-shot skip branch.");
+        int skipJump = xorOffset + 3;
+        Equal(
+            duplicateTarget + duplicateOriginal.Length + 5,
+            DecodeRelativeDestination(duplicate.Code, cave, skipJump),
+            "Duplicate one-shot branch must skip exactly the following five-byte guard call.");
+        int normalJump = skipJump + 5;
+        Equal((byte)0xE9, duplicate.Code[normalJump], "Duplicate payload is missing its normal branch.");
+        Equal(
+            duplicateTarget + duplicateOriginal.Length,
+            DecodeRelativeDestination(duplicate.Code, cave, normalJump),
+            "Duplicate normal branch returns to the wrong instruction.");
+        return Task.CompletedTask;
+    }
+
+    private static Task TestRemoteCodeHook()
+    {
+        FakeMemory memory = new();
+        nint target = (nint)0x1010;
+        byte[] original = [0x48, 0x89, 0x83, 0x30, 0x02, 0x00, 0x00];
+        memory.WriteBytes(target, original);
+        using (RemoteCodeHook hook = RemoteCodeHook.Install(
+                   memory,
+                   target,
+                   original,
+                   TrainerHookPayloadFactory.CreateForcedLevelUpItem))
+        {
+            Equal((byte)0xE9, memory.ReadBytes(target, original.Length)[0],
+                "Installed hook did not replace the target with a rel32 jump.");
+            hook.WriteData(TrainerHookPayloadFactory.ItemId, BitConverter.GetBytes(155));
+            hook.WriteData(TrainerHookPayloadFactory.EnabledFlag, [1]);
+            Equal(155, BitConverter.ToInt32(hook.ReadData(TrainerHookPayloadFactory.ItemId, sizeof(int))),
+                "Hook item ID data did not round-trip.");
+            Equal((byte)1, hook.ReadData(TrainerHookPayloadFactory.EnabledFlag, 1)[0],
+                "Hook enabled flag did not round-trip.");
+        }
+
+        True(memory.ReadBytes(target, original.Length).SequenceEqual(original),
+            "Remote hook did not restore the original target bytes.");
+        Equal(1, memory.FreeExecutableCount, "Remote hook code cave was not released exactly once.");
+        return Task.CompletedTask;
+    }
+
     private static Task TestOffsetCatalog()
     {
         string directory = Path.Combine(Path.GetTempPath(), $"VSModifierTests_{Guid.NewGuid():N}");
@@ -802,6 +1036,55 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static async Task TestTrainerValueSafety()
+    {
+        FakeMemory memory = new();
+        AddressDefinition online = new() { Module = "GameAssembly.dll", BaseOffset = 16 };
+        AddressDefinition valueAddress = new() { Module = "GameAssembly.dll", BaseOffset = 32 };
+        GameVersionProfile profile = new()
+        {
+            ProfileId = "value-safety",
+            GameAssemblySha256 = new string('a', 64),
+            UnityPlayerSha256 = new string('b', 64),
+            Il2CppMetadataSha256 = new string('c', 64),
+            Verified = false,
+            OnlineSession = online,
+            Features = new Dictionary<string, FeatureDefinition>(StringComparer.Ordinal)
+            {
+                ["test.value"] = new FeatureDefinition
+                {
+                    Kind = FeatureKind.Value,
+                    ValueType = MemoryValueType.Float,
+                    MinValue = 0,
+                    MaxValue = 10,
+                    Address = valueAddress
+                }
+            }
+        };
+
+        nint currentValueAddress = (nint)0x1010;
+        memory.WriteBytes((nint)0x1000, [0]);
+        memory.WriteBytes((nint)0x1010, BitConverter.GetBytes(2f));
+        memory.WriteBytes((nint)0x1020, BitConverter.GetBytes(9f));
+        await using TrainerSession session = new(
+            memory,
+            profile,
+            definition => definition.BaseOffset == online.BaseOffset
+                ? (nint)0x1000
+                : currentValueAddress);
+
+        Equal(4d, session.WriteValue("test.value", 4), "One-shot value write did not read back.");
+        Throws<ArgumentOutOfRangeException>(() => session.WriteValue("test.value", 11));
+        session.EnableValueLock("test.value", 5);
+        await Task.Delay(140);
+        currentValueAddress = (nint)0x1020;
+        session.DisableValueLock("test.value");
+        Equal(4f, BitConverter.ToSingle(memory.ReadBytes((nint)0x1010, sizeof(float))),
+            "Value lock did not restore the original bytes at the exact captured address.");
+        Equal(9f, BitConverter.ToSingle(memory.ReadBytes((nint)0x1020, sizeof(float))),
+            "Value restoration must not follow a moved pointer chain into a new object.");
+    }
+
     private static async Task TestValueLockService()
     {
         int counter = 0;
@@ -835,6 +1118,134 @@ internal static class Program
             await Task.Delay(50);
             Equal(stoppedValue, Volatile.Read(ref guardedCounter), "No lock may continue after a fail-closed safety event.");
         }
+    }
+
+    private static async Task TestValueLockSharedGuard()
+    {
+        int guardRuns = 0;
+        int enforcements = 0;
+        int guardRunsAtFirstEnforcement = -1;
+        await using (ValueLockService service = new(
+            TimeSpan.FromMilliseconds(15),
+            stopAllOnFailure: true,
+            guard: () => Interlocked.Increment(ref guardRuns)))
+        {
+            for (int index = 0; index < 4; index++)
+            {
+                service.Set($"lock{index}", () =>
+                {
+                    if (Interlocked.Increment(ref enforcements) == 1)
+                    {
+                        guardRunsAtFirstEnforcement = Volatile.Read(ref guardRuns);
+                    }
+                });
+            }
+
+            True(guardRunsAtFirstEnforcement >= 1, "The shared guard must run before the first enforced write.");
+            int baselineGuardRuns = Volatile.Read(ref guardRuns);
+            int baselineEnforcements = Volatile.Read(ref enforcements);
+            await Task.Delay(90);
+            int guardDelta = Volatile.Read(ref guardRuns) - baselineGuardRuns;
+            int enforceDelta = Volatile.Read(ref enforcements) - baselineEnforcements;
+            True(guardDelta >= 2, "The shared guard must keep running on every period.");
+            True(
+                enforceDelta >= guardDelta * 2,
+                "Four locks must be enforced per guard run; the guard cost must not scale with the lock count.");
+        }
+
+        int blockedEnforcements = 0;
+        int guardChecks = 0;
+        TaskCompletionSource<ValueLockFailureEventArgs> failure = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using (ValueLockService failClosed = new(
+            TimeSpan.FromMilliseconds(15),
+            stopAllOnFailure: true,
+            guard: () =>
+            {
+                if (Interlocked.Increment(ref guardChecks) >= 2)
+                {
+                    throw new OnlineSessionException("online");
+                }
+            }))
+        {
+            failClosed.LockFailed += (_, args) => failure.TrySetResult(args);
+            failClosed.Set("value", () => Interlocked.Increment(ref blockedEnforcements));
+            ValueLockFailureEventArgs result = await failure.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            Equal(ValueLockService.DefaultGuardKey, result.Key, "A guard failure must be reported under the guard key.");
+            True(failClosed.ActiveLocks.Count == 0, "A failed guard must clear every lock.");
+            int stopped = Volatile.Read(ref blockedEnforcements);
+            await Task.Delay(60);
+            Equal(stopped, Volatile.Read(ref blockedEnforcements), "No lock may run after the shared guard failed.");
+            Throws<InvalidOperationException>(() => failClosed.Set("late", () => { }));
+        }
+    }
+
+    /// <summary>
+    /// 以本測試行程自身當目標，實際走一次 ReadProcessMemory／WriteProcessMemory，
+    /// 涵蓋 span 版讀取與模組快取；不需要遊戲執行，也不會碰到遊戲記憶體。
+    /// </summary>
+    private static Task TestProcessMemoryRoundTrip()
+    {
+        byte[] payload = [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88];
+        GCHandle pinned = GCHandle.Alloc(payload, GCHandleType.Pinned);
+        try
+        {
+            nint address = pinned.AddrOfPinnedObject();
+            using Process current = Process.GetCurrentProcess();
+            using ProcessMemorySession session = ProcessMemorySession.Attach(current.ProcessName);
+            Equal(current.Id, session.ProcessId, "The self-attach test must target this very process.");
+
+            True(
+                session.ReadBytes(address, payload.Length).AsSpan().SequenceEqual(payload),
+                "Array read returned different bytes.");
+
+            Span<byte> destination = stackalloc byte[payload.Length];
+            session.ReadBytes(address, destination);
+            True(destination.SequenceEqual(payload), "Span read returned different bytes.");
+
+            Equal(0x44332211, session.Read<int>(address), "Typed read decoded the wrong value.");
+
+            byte[] replacement = [0xDE, 0xAD, 0xBE, 0xEF, 0x0A, 0x0B, 0x0C, 0x0D];
+            session.WriteBytes(address, replacement);
+            True(payload.AsSpan().SequenceEqual(replacement), "Native write did not reach the pinned buffer.");
+            True(
+                session.ReadBytes(address, replacement.Length).AsSpan().SequenceEqual(replacement),
+                "Written bytes did not read back.");
+
+            ProcessModuleInfo first = session.GetModuleInfo(current.MainModule!.ModuleName);
+            ProcessModuleInfo second = session.GetModuleInfo(current.MainModule!.ModuleName);
+            Equal(first, second, "The module cache must return the same resolved module info.");
+            True(first.BaseAddress != 0, "The resolved module base address must not be null.");
+        }
+        finally
+        {
+            pinned.Free();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static Task TestTrainerRejectsOnlineSession()
+    {
+        FakeMemory memory = new();
+        AddressDefinition online = new() { Module = "GameAssembly.dll", BaseOffset = 16 };
+        GameVersionProfile profile = new()
+        {
+            ProfileId = "online-guard",
+            GameAssemblySha256 = new string('a', 64),
+            UnityPlayerSha256 = new string('b', 64),
+            Il2CppMetadataSha256 = new string('c', 64),
+            Verified = false,
+            OnlineSession = online,
+            Features = new Dictionary<string, FeatureDefinition>(StringComparer.Ordinal)
+        };
+
+        memory.WriteBytes((nint)0x1000, [1]);
+        Throws<OnlineSessionException>(() => new TrainerSession(memory, profile, _ => (nint)0x1000));
+
+        memory.WriteBytes((nint)0x1000, [0]);
+        TrainerSession offlineSession = new(memory, profile, _ => (nint)0x1000);
+        True(offlineSession.IsAttached, "An offline session must attach.");
+        return offlineSession.DisposeAsync().AsTask();
     }
 
     private static string CreateValidSave()
@@ -893,7 +1304,13 @@ internal static class Program
         public bool IsGameRunning() => running;
     }
 
-    private sealed class FakeMemory : IProtectedMemoryAccessor
+    private static nint DecodeRelativeDestination(byte[] code, nint baseAddress, int jumpOffset)
+    {
+        int displacement = BitConverter.ToInt32(code, jumpOffset + 1);
+        return baseAddress + jumpOffset + 5 + displacement;
+    }
+
+    private sealed class FakeMemory : IRemoteCodeMemory
     {
         private const long BaseAddress = 0x1000;
         private readonly byte[] _bytes = new byte[0x400];
@@ -901,6 +1318,8 @@ internal static class Program
         public int CodeWriteCount { get; private set; }
 
         public nint? FailNextCodeWriteAt { get; set; }
+
+        public int FreeExecutableCount { get; private set; }
 
         public byte[] ReadBytes(nint address, int length)
         {
@@ -924,6 +1343,18 @@ internal static class Program
             }
 
             WriteBytes(address, bytes);
+        }
+
+        public nint AllocateExecutableNear(nint targetAddress, int length)
+        {
+            True(length <= 0x200, "Fake remote allocation is too small for the requested payload.");
+            return (nint)0x1200;
+        }
+
+        public void FreeExecutable(nint address)
+        {
+            Equal((nint)0x1200, address, "Unexpected fake remote allocation address.");
+            FreeExecutableCount++;
         }
     }
 }

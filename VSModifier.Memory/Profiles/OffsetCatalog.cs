@@ -167,6 +167,38 @@ public sealed class OffsetCatalog
                 throw new InvalidDataException($"數值功能 {featureKey} 不得包含 patch 位元組。");
             }
 
+            if (feature.MinValue is double minimum && !double.IsFinite(minimum)
+                || feature.MaxValue is double maximum && !double.IsFinite(maximum)
+                || feature.MinValue is double min
+                    && feature.MaxValue is double max
+                    && min > max)
+            {
+                throw new InvalidDataException($"數值功能 {featureKey} 的允許範圍無效。");
+            }
+
+            return;
+        }
+
+        if (feature.MinValue is not null || feature.MaxValue is not null || feature.PreserveZero)
+        {
+            throw new InvalidDataException($"非數值功能 {featureKey} 不得包含數值範圍或 preserveZero。");
+        }
+
+        if (feature.Kind == FeatureKind.Hook)
+        {
+            byte[] expected = ParseHexBytes(feature.ExpectedBytes, $"{featureKey} expectedBytes");
+            if (expected.Length < 5)
+            {
+                throw new InvalidDataException($"Hook {featureKey} 的 expectedBytes 不足五個位元組。");
+            }
+
+            if (!string.IsNullOrWhiteSpace(feature.PatchBytes)
+                || feature.AdditionalPatches.Count > 0
+                || feature.Address.PointerOffsets.Count > 0)
+            {
+                throw new InvalidDataException($"Hook {featureKey} 只能使用直接程式碼位址與 expectedBytes。");
+            }
+
             return;
         }
 
@@ -283,6 +315,10 @@ public sealed class FeatureDefinition
 
     public bool PreserveZero { get; init; }
 
+    public double? MinValue { get; init; }
+
+    public double? MaxValue { get; init; }
+
     public string? ExpectedBytes { get; init; }
 
     public string? PatchBytes { get; init; }
@@ -317,7 +353,8 @@ public sealed class AddressDefinition
 public enum FeatureKind
 {
     Value,
-    Patch
+    Patch,
+    Hook
 }
 
 public enum MemoryValueType

@@ -24,6 +24,20 @@ public sealed record PatchVerificationResult(
     bool RestoredBytesMatched,
     TimeSpan Duration);
 
+public sealed record HookVerificationResult(
+    string ProfileId,
+    string FeatureKey,
+    bool InstalledJumpMatched,
+    bool RestoredBytesMatched,
+    TimeSpan Duration);
+
+public sealed record ForcedItemBehaviorVerificationResult(
+    string ProfileId,
+    int ItemId,
+    bool InstalledJumpMatched,
+    bool RestoredBytesMatched,
+    TimeSpan Duration);
+
 public static class TrainerVerificationRunner
 {
     public static async Task<ValueVerificationResult> VerifyValueAsync(
@@ -148,6 +162,134 @@ public static class TrainerVerificationRunner
         }
     }
 
+    public static async Task<HookVerificationResult> VerifyHookAsync(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        string featureKey,
+        TimeSpan duration,
+        int forcedItemId = 1,
+        CancellationToken cancellationToken = default)
+    {
+        await using TrainerSession session = TrainerSession.AttachForVerification(
+            catalog,
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath,
+            expectedProfileId,
+            featureKey,
+            FeatureKind.Hook,
+            duration);
+        TaskCompletionSource<TrainerSafetyStopEventArgs> safetyStop = CreateSafetyStopSignal(session);
+        try
+        {
+            if (!session.HookMatchesOriginalForVerification(featureKey))
+            {
+                throw new InvalidDataException("套用前的 hook 目標位元組與 Profile 不符，已拒絕驗證。");
+            }
+
+            switch (featureKey)
+            {
+                case "forceLevelUpItem":
+                    session.EnableForcedLevelUpItem(forcedItemId);
+                    break;
+                case "duplicateNextWeapon":
+                    session.TriggerDuplicateNextWeapon();
+                    break;
+                case "duplicateNextAccessory":
+                    session.TriggerDuplicateNextAccessory();
+                    break;
+                default:
+                    throw new InvalidOperationException($"沒有 {featureKey} 的開發 hook 驗證動作。");
+            }
+
+            bool installed = session.HookJumpInstalledForVerification(featureKey);
+            if (!installed)
+            {
+                throw new IOException("Hook 跳躍安裝後讀回驗證失敗。");
+            }
+
+            await WaitForDurationOrSafetyStop(duration, safetyStop.Task, cancellationToken).ConfigureAwait(false);
+            session.DisableHookForVerification(featureKey);
+            bool restored = session.HookMatchesOriginalForVerification(featureKey);
+            if (!restored)
+            {
+                throw new IOException("Hook 原始指令還原後讀回驗證失敗。");
+            }
+
+            return new HookVerificationResult(
+                session.Profile.ProfileId,
+                featureKey,
+                installed,
+                restored,
+                duration);
+        }
+        finally
+        {
+            TryRestoreHook(session, featureKey);
+        }
+    }
+
+    public static async Task<ForcedItemBehaviorVerificationResult> VerifyForcedItemBehaviorAsync(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        int forcedItemId,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+    {
+        await using TrainerSession session = TrainerSession.AttachForForcedItemBehaviorVerification(
+            catalog,
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath,
+            expectedProfileId,
+            duration);
+        TaskCompletionSource<TrainerSafetyStopEventArgs> safetyStop = CreateSafetyStopSignal(session);
+        try
+        {
+            if (!session.HookMatchesOriginalForVerification("forceLevelUpItem"))
+            {
+                throw new InvalidDataException("套用前的強制升級 hook 位元組與 Profile 不符。");
+            }
+
+            session.EnableValueLock("invulnerability", 1);
+            session.EnableForcedLevelUpItem(forcedItemId);
+            bool installed = session.HookJumpInstalledForVerification("forceLevelUpItem");
+            if (!installed)
+            {
+                throw new IOException("強制升級 hook 安裝後讀回驗證失敗。");
+            }
+
+            await WaitForDurationOrSafetyStop(duration, safetyStop.Task, cancellationToken).ConfigureAwait(false);
+            session.DisableForcedLevelUpItem();
+            bool restored = session.HookMatchesOriginalForVerification("forceLevelUpItem");
+            session.DisableValueLock("invulnerability");
+            return new ForcedItemBehaviorVerificationResult(
+                session.Profile.ProfileId,
+                forcedItemId,
+                installed,
+                restored,
+                duration);
+        }
+        finally
+        {
+            TryRestoreHook(session, "forceLevelUpItem");
+            try
+            {
+                session.DisableValueLock("invulnerability");
+            }
+            catch
+            {
+                // DisposeAsync retains and retries the captured original value.
+            }
+        }
+    }
+
     private static TaskCompletionSource<TrainerSafetyStopEventArgs> CreateSafetyStopSignal(TrainerSession session)
     {
         TaskCompletionSource<TrainerSafetyStopEventArgs> signal = new(
@@ -197,6 +339,18 @@ public static class TrainerVerificationRunner
         catch
         {
             // DisposeAsync retains and retries any tracked patch.
+        }
+    }
+
+    private static void TryRestoreHook(TrainerSession session, string featureKey)
+    {
+        try
+        {
+            session.DisableHookForVerification(featureKey);
+        }
+        catch
+        {
+            // DisposeAsync retains and retries any tracked hook.
         }
     }
 }
