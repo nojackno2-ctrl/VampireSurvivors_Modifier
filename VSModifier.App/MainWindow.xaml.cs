@@ -20,10 +20,22 @@ namespace VSModifier.App;
 public partial class MainWindow : Window
 {
     private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
+
+    // 狀態列每秒更新一次；筆刷改為凍結後共用，避免每次都解析色碼並配置新的 SolidColorBrush。
+    private static readonly Brush GameRunningLightBrush = CreateFrozenBrush("#EF4444");
+    private static readonly Brush GameStoppedLightBrush = CreateFrozenBrush("#22C55E");
+    private static readonly Brush GameRunningTextBrush = CreateFrozenBrush("#FCA5A5");
+    private static readonly Brush GameStoppedTextBrush = CreateFrozenBrush("#86EFAC");
+    private static readonly Brush ChecksumValidBrush = CreateFrozenBrush("#4ADE80");
+    private static readonly Brush StatusErrorBrush = CreateFrozenBrush("#FCA5A5");
+    private static readonly Brush StatusNormalBrush = CreateFrozenBrush("#CBD5E1");
+
     private readonly GameProcessDetector _processDetector = new();
     private readonly SaveFileService _saveFileService;
     private readonly SavePathLocator _savePathLocator = new();
     private readonly DispatcherTimer _statusTimer;
+    private readonly OffsetCatalogFile _offsetCatalogFile =
+        new(Path.Combine(AppContext.BaseDirectory, "data", "offsets.json"));
     private readonly Dictionary<string, (CheckBox Toggle, TextBox Value)> _trainerAttributeControls = new(StringComparer.Ordinal);
     private readonly HashSet<string> _additiveTrainerFeatures = new(StringComparer.Ordinal)
     {
@@ -35,8 +47,11 @@ public partial class MainWindow : Window
     private OffsetCatalog? _offsetCatalog;
     private GameVersionProfile? _gameProfile;
     private TrainerSession? _trainerSession;
+    private ForcedItemCatalog? _forcedItemCatalog;
     private GlobalHotkeyService? _hotkeyService;
+    private bool? _gameRunningDisplayed;
     private bool _updatingTrainerUi;
+    private bool _refreshingTrainerProfile;
     private JsonTreeEntry? _selectedJsonTreeEntry;
 
     public MainWindow()
@@ -45,6 +60,7 @@ public partial class MainWindow : Window
         _saveFileService = new SaveFileService(_processDetector);
         _statusTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, StatusTimer_Tick, Dispatcher);
         CreateTrainerAttributeControls();
+        LoadForcedItemCatalog();
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
         Closed += MainWindow_Closed;
@@ -92,19 +108,33 @@ public partial class MainWindow : Window
         {
             await DetachTrainerAsync("遊戲行程已結束；Trainer 已中斷。", showErrors: false);
         }
+
+        if (_trainerSession is null
+            && !_refreshingTrainerProfile
+            && _offsetCatalogFile.HasChanged())
+        {
+            await InitializeTrainerAsync();
+        }
     }
 
     private void UpdateGameStatus()
     {
         bool running = _processDetector.IsGameRunning();
-        GameStatusLight.Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#EF4444" : "#22C55E"));
-        GameStatusLight.ToolTip = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
-        GameStatusText.Text = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
-        GameStatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(running ? "#FCA5A5" : "#86EFAC"));
+        if (_gameRunningDisplayed != running)
+        {
+            _gameRunningDisplayed = running;
+            string text = running ? "遊戲執行中：禁止寫入" : "遊戲已關閉：可安全寫入";
+            GameStatusLight.Fill = running ? GameRunningLightBrush : GameStoppedLightBrush;
+            GameStatusLight.ToolTip = text;
+            GameStatusText.Text = text;
+            GameStatusText.Foreground = running ? GameRunningTextBrush : GameStoppedTextBrush;
+        }
+
         SaveButton.IsEnabled = _document is not null && !running;
         AttachTrainerButton.IsEnabled = running
             && _trainerSession is null
             && _gameProfile is { Verified: true, OnlineSession: not null };
+        RefreshTrainerProfileButton.IsEnabled = _trainerSession is null && !_refreshingTrainerProfile;
     }
 
     private async void DetectSaveButton_Click(object sender, RoutedEventArgs e)
@@ -146,7 +176,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void ReloadButton_Click(object sender, RoutedEventArgs e) => await LoadSaveAsync();
+    private async void ReloadButton_Click(object sender, RoutedEventArgs e)
+    {
+        await LoadSaveAsync();
+        await InitializeTrainerAsync();
+    }
 
     private async Task LoadSaveAsync()
     {
@@ -163,7 +197,7 @@ public partial class MainWindow : Window
             FileInfo info = new(SavePathTextBox.Text);
             SaveSizeText.Text = $"{info.Length:N0} bytes";
             ChecksumText.Text = "有效（SHA-256）";
-            ChecksumText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString("#4ADE80"));
+            ChecksumText.Foreground = ChecksumValidBrush;
             SetStatus("存檔已載入；所有修改仍只在記憶體中。", isError: false);
         }
         catch (Exception exception)
@@ -677,7 +711,14 @@ public partial class MainWindow : Window
     private void SetStatus(string message, bool isError)
     {
         StatusText.Text = message;
-        StatusText.Foreground = new SolidColorBrush((Color)ColorConverter.ConvertFromString(isError ? "#FCA5A5" : "#CBD5E1"));
+        StatusText.Foreground = isError ? StatusErrorBrush : StatusNormalBrush;
+    }
+
+    private static Brush CreateFrozenBrush(string color)
+    {
+        SolidColorBrush brush = new((Color)ColorConverter.ConvertFromString(color));
+        brush.Freeze();
+        return brush;
     }
 
     private void ShowError(string title, Exception exception)
@@ -688,9 +729,18 @@ public partial class MainWindow : Window
 
     private async Task InitializeTrainerAsync()
     {
+        if (_refreshingTrainerProfile || _trainerSession is not null)
+        {
+            return;
+        }
+
+        _refreshingTrainerProfile = true;
+        _gameProfile = null;
+        _offsetCatalog = null;
         try
         {
             TrainerStatusText.Text = "正在辨識遊戲版本…";
+            TrainerStatusText.Foreground = Brushes.LightGray;
             _gameInstallation = new GameInstallationLocator().FindInstallations().FirstOrDefault();
             if (_gameInstallation is null)
             {
@@ -701,8 +751,7 @@ public partial class MainWindow : Window
             }
 
             TrainerGamePathText.Text = _gameInstallation.RootPath;
-            string offsetsPath = Path.Combine(AppContext.BaseDirectory, "data", "offsets.json");
-            _offsetCatalog = OffsetCatalog.Load(offsetsPath);
+            _offsetCatalog = _offsetCatalogFile.Reload();
             GameVersionFingerprint fingerprint = await Task.Run(() => GameVersionFingerprint.Calculate(
                 _gameInstallation.GameAssemblyPath,
                 _gameInstallation.UnityPlayerPath,
@@ -712,15 +761,15 @@ public partial class MainWindow : Window
             if (_gameProfile is null)
             {
                 TrainerVersionText.Text = $"未知組合（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
-                TrainerStatusText.Text = $"{match.Error} 已拒絕附加。";
+                TrainerStatusText.Text = $"{match.Error} 已拒絕附加；若剛更新 Profile，可按「重新偵測版本」。";
                 TrainerStatusText.Foreground = Brushes.OrangeRed;
                 return;
             }
 
-            TrainerVersionText.Text = $"{_gameProfile.Label}（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
+            TrainerVersionText.Text = $"{_gameProfile.Label} [{_gameProfile.ProfileId}]（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
             if (!_gameProfile.Verified)
             {
-                TrainerStatusText.Text = "版本已辨識，但偏移尚未實機驗證；已拒絕附加。";
+                TrainerStatusText.Text = "版本已辨識，但偏移尚未完成單人關卡實機驗證；這不是按鈕故障，驗證完成前會拒絕附加。";
                 TrainerStatusText.Foreground = Brushes.Orange;
                 return;
             }
@@ -743,20 +792,30 @@ public partial class MainWindow : Window
         }
         finally
         {
+            _refreshingTrainerProfile = false;
             UpdateGameStatus();
         }
     }
 
+    private async void RefreshTrainerProfileButton_Click(object sender, RoutedEventArgs e)
+    {
+        await InitializeTrainerAsync();
+    }
+
     private async void AttachTrainerButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_offsetCatalog is null || _gameInstallation is null)
-        {
-            return;
-        }
-
         try
         {
             AttachTrainerButton.IsEnabled = false;
+            TrainerStatusText.Text = "附加前正在重新驗證版本…";
+            await InitializeTrainerAsync();
+            if (_offsetCatalog is null
+                || _gameInstallation is null
+                || _gameProfile is not { Verified: true, OnlineSession: not null })
+            {
+                return;
+            }
+
             TrainerStatusText.Text = "正在安全附加…";
             _trainerSession = await Task.Run(() => TrainerSession.Attach(
                 _offsetCatalog,
@@ -774,6 +833,10 @@ public partial class MainWindow : Window
         {
             TrainerStatusText.Text = exception.Message;
             TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+        finally
+        {
+            UpdateGameStatus();
         }
     }
 
@@ -1004,6 +1067,130 @@ public partial class MainWindow : Window
         });
     }
 
+    private void TrainerNumericReadButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string key } || _trainerSession is null)
+        {
+            return;
+        }
+
+        try
+        {
+            double value = _trainerSession.ReadValue(key);
+            GetRuntimeValueTextBox(key).Text = value.ToString("R", CultureInfo.InvariantCulture);
+            TrainerStatusText.Text = $"{key} 已讀取：{value.ToString("R", CultureInfo.InvariantCulture)}。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private void TrainerNumericWriteButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string key } || _trainerSession is null)
+        {
+            return;
+        }
+
+        try
+        {
+            TextBox valueBox = GetRuntimeValueTextBox(key);
+            double requested = ParseDouble(valueBox.Text, key);
+            double actual = _trainerSession.WriteValue(key, requested);
+            valueBox.Text = actual.ToString("R", CultureInfo.InvariantCulture);
+            TrainerStatusText.Text = $"{key} 已設定並讀回驗證：{actual.ToString("R", CultureInfo.InvariantCulture)}。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private void ForceLevelUpItemCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        if (_updatingTrainerUi || _trainerSession is null)
+        {
+            return;
+        }
+
+        ApplyTrainerAction(ForceLevelUpItemCheckBox, () =>
+        {
+            if (ForceLevelUpItemCheckBox.IsChecked == true)
+            {
+                ForcedItemDefinition item = ForceLevelUpItemComboBox.SelectedItem as ForcedItemDefinition
+                    ?? throw new InvalidOperationException("請先選擇要強制出現的升級道具。");
+                _trainerSession.EnableForcedLevelUpItem(item.Id);
+            }
+            else
+            {
+                _trainerSession.DisableForcedLevelUpItem();
+            }
+        });
+    }
+
+    private void ForceLevelUpItemComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingTrainerUi
+            || ForceLevelUpItemCheckBox.IsChecked != true
+            || _trainerSession is null
+            || ForceLevelUpItemComboBox.SelectedItem is not ForcedItemDefinition item)
+        {
+            return;
+        }
+
+        try
+        {
+            _trainerSession.EnableForcedLevelUpItem(item.Id);
+            TrainerStatusText.Text = $"強制升級候選已改為 {item.DisplayName}。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            _updatingTrainerUi = true;
+            ForceLevelUpItemCheckBox.IsChecked = false;
+            _updatingTrainerUi = false;
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
+    private void DuplicateNextButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button { Tag: string key } || _trainerSession is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (key == "duplicateNextWeapon")
+            {
+                _trainerSession.TriggerDuplicateNextWeapon();
+            }
+            else if (key == "duplicateNextAccessory")
+            {
+                _trainerSession.TriggerDuplicateNextAccessory();
+            }
+            else
+            {
+                throw new InvalidOperationException($"未知的重複裝備功能：{key}。");
+            }
+
+            TrainerStatusText.Text = $"{((Button)sender).Content}：已準備下一次新增。";
+            TrainerStatusText.Foreground = Brushes.LightGreen;
+        }
+        catch (Exception exception)
+        {
+            TrainerStatusText.Text = exception.Message;
+            TrainerStatusText.Foreground = Brushes.OrangeRed;
+        }
+    }
+
     private void ApplyTrainerAction(CheckBox toggle, Action action)
     {
         try
@@ -1055,6 +1242,33 @@ public partial class MainWindow : Window
         }
     }
 
+    private void LoadForcedItemCatalog()
+    {
+        try
+        {
+            _forcedItemCatalog = ForcedItemCatalog.Load(
+                Path.Combine(AppContext.BaseDirectory, "data", "ids", "forced-level-up-items.json"));
+            ForceLevelUpItemComboBox.ItemsSource = _forcedItemCatalog.Items;
+            ForceLevelUpItemComboBox.SelectedIndex = 0;
+        }
+        catch
+        {
+            _forcedItemCatalog = null;
+            ForceLevelUpItemComboBox.ItemsSource = null;
+        }
+    }
+
+    private TextBox GetRuntimeValueTextBox(string featureKey)
+    {
+        return featureKey switch
+        {
+            "coins" => RuntimeCoinsTextBox,
+            "level" => RuntimeLevelTextBox,
+            "experience" => RuntimeExperienceTextBox,
+            _ => throw new KeyNotFoundException($"找不到 {featureKey} 的即時數值欄位。")
+        };
+    }
+
     private void UpdateTrainerFeatureAvailability()
     {
         if (_trainerSession is null)
@@ -1068,6 +1282,23 @@ public partial class MainWindow : Window
         MaxTreasureCheckBox.IsEnabled = features.ContainsKey("maxTreasure");
         DamageMultiplierCheckBox.IsEnabled = features.ContainsKey("damageMultiplier");
         GameSpeedCheckBox.IsEnabled = features.ContainsKey("gameSpeed");
+        bool supportsCoins = features.ContainsKey("coins");
+        RuntimeCoinsTextBox.IsEnabled = supportsCoins;
+        ReadRuntimeCoinsButton.IsEnabled = supportsCoins;
+        WriteRuntimeCoinsButton.IsEnabled = supportsCoins;
+        bool supportsLevel = features.ContainsKey("level");
+        RuntimeLevelTextBox.IsEnabled = supportsLevel;
+        ReadRuntimeLevelButton.IsEnabled = supportsLevel;
+        WriteRuntimeLevelButton.IsEnabled = supportsLevel;
+        bool supportsExperience = features.ContainsKey("experience");
+        RuntimeExperienceTextBox.IsEnabled = supportsExperience;
+        ReadRuntimeExperienceButton.IsEnabled = supportsExperience;
+        WriteRuntimeExperienceButton.IsEnabled = supportsExperience;
+        bool supportsForcedItem = features.ContainsKey("forceLevelUpItem") && _forcedItemCatalog is not null;
+        ForceLevelUpItemCheckBox.IsEnabled = supportsForcedItem;
+        ForceLevelUpItemComboBox.IsEnabled = supportsForcedItem;
+        DuplicateNextWeaponButton.IsEnabled = features.ContainsKey("duplicateNextWeapon");
+        DuplicateNextAccessoryButton.IsEnabled = features.ContainsKey("duplicateNextAccessory");
         foreach ((string key, (CheckBox toggle, _)) in _trainerAttributeControls)
         {
             toggle.IsEnabled = features.ContainsKey(key);
@@ -1082,6 +1313,7 @@ public partial class MainWindow : Window
         MaxTreasureCheckBox.IsChecked = false;
         DamageMultiplierCheckBox.IsChecked = false;
         GameSpeedCheckBox.IsChecked = false;
+        ForceLevelUpItemCheckBox.IsChecked = false;
         foreach ((_, (CheckBox toggle, _)) in _trainerAttributeControls)
         {
             toggle.IsChecked = false;

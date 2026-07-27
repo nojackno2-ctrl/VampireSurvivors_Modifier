@@ -6,6 +6,7 @@ public static class TrainerProfilePolicy
 {
     public static readonly TimeSpan MinimumVerificationDuration = TimeSpan.FromMilliseconds(100);
     public static readonly TimeSpan MaximumVerificationDuration = TimeSpan.FromSeconds(5);
+    public static readonly TimeSpan MaximumHookVerificationDuration = TimeSpan.FromSeconds(30);
 
     public static void RequireReleaseReady(GameVersionProfile profile)
     {
@@ -28,6 +29,38 @@ public static class TrainerProfilePolicy
         FeatureKind expectedKind,
         TimeSpan duration)
     {
+        return RequireDevelopmentVerificationCore(
+            profile,
+            expectedProfileId,
+            featureKey,
+            expectedKind,
+            duration,
+            MaximumVerificationDuration);
+    }
+
+    public static FeatureDefinition RequireDevelopmentHookVerification(
+        GameVersionProfile profile,
+        string expectedProfileId,
+        string featureKey,
+        TimeSpan duration)
+    {
+        return RequireDevelopmentVerificationCore(
+            profile,
+            expectedProfileId,
+            featureKey,
+            FeatureKind.Hook,
+            duration,
+            MaximumHookVerificationDuration);
+    }
+
+    private static FeatureDefinition RequireDevelopmentVerificationCore(
+        GameVersionProfile profile,
+        string expectedProfileId,
+        string featureKey,
+        FeatureKind expectedKind,
+        TimeSpan duration,
+        TimeSpan maximumDuration)
+    {
         ArgumentNullException.ThrowIfNull(profile);
         ArgumentException.ThrowIfNullOrWhiteSpace(expectedProfileId);
         ArgumentException.ThrowIfNullOrWhiteSpace(featureKey);
@@ -42,11 +75,11 @@ public static class TrainerProfilePolicy
             throw new InvalidOperationException("此版本缺少線上會話防護偏移，已拒絕驗證。");
         }
 
-        if (duration < MinimumVerificationDuration || duration > MaximumVerificationDuration)
+        if (duration < MinimumVerificationDuration || duration > maximumDuration)
         {
             throw new ArgumentOutOfRangeException(
                 nameof(duration),
-                $"開發驗證時間必須介於 {MinimumVerificationDuration.TotalMilliseconds:R} 與 {MaximumVerificationDuration.TotalMilliseconds:R} 毫秒。");
+                $"開發驗證時間必須介於 {MinimumVerificationDuration.TotalMilliseconds:R} 與 {maximumDuration.TotalMilliseconds:R} 毫秒。");
         }
 
         if (!profile.Features.TryGetValue(featureKey, out FeatureDefinition? feature))

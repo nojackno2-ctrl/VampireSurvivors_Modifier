@@ -9,30 +9,73 @@ namespace VSModifier.Memory.Trainer;
 public sealed class TrainerSession : IAsyncDisposable
 {
     private const string SafetyGuardKey = "__onlineSessionGuard";
-    private readonly ProcessMemorySession _memory;
-    private readonly ValueLockService _locks = new(stopAllOnFailure: true);
+    private readonly IProtectedMemoryAccessor _memory;
+    private readonly IRemoteCodeMemory? _remoteCodeMemory;
+    private readonly Func<bool> _hasExited;
+    private readonly Action _disposeMemory;
+    private readonly Func<AddressDefinition, nint> _addressResolver;
+    private readonly ValueLockService _locks;
     private readonly object _stateGate = new();
-    private readonly Dictionary<string, byte[]> _originalValues = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, OriginalValueSnapshot> _originalValues = new(StringComparer.Ordinal);
     private readonly Dictionary<string, MemoryPatchSet> _patches = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, RemoteCodeHook> _hooks = new(StringComparer.Ordinal);
     private readonly string? _verificationFeatureKey;
+    private readonly bool _allowInvulnerabilityCompanion;
     private Exception? _safetyStopCause;
     private bool _disposed;
 
     private TrainerSession(
         ProcessMemorySession memory,
         GameVersionProfile profile,
-        string? verificationFeatureKey = null)
+        string? verificationFeatureKey = null,
+        bool allowInvulnerabilityCompanion = false)
+        : this(
+            memory,
+            profile,
+            definition => ProfileAddressResolver.Resolve(memory, definition),
+            () => memory.HasExited,
+            memory.Dispose,
+            verificationFeatureKey,
+            allowInvulnerabilityCompanion)
     {
+    }
+
+    internal TrainerSession(
+        IProtectedMemoryAccessor memory,
+        GameVersionProfile profile,
+        Func<AddressDefinition, nint> addressResolver,
+        Func<bool>? hasExited = null,
+        Action? disposeMemory = null,
+        string? verificationFeatureKey = null,
+        bool allowInvulnerabilityCompanion = false)
+    {
+        ArgumentNullException.ThrowIfNull(memory);
+        ArgumentNullException.ThrowIfNull(profile);
+        ArgumentNullException.ThrowIfNull(addressResolver);
         _memory = memory;
+        _remoteCodeMemory = memory as IRemoteCodeMemory;
+        _addressResolver = addressResolver;
+        _hasExited = hasExited ?? (() => false);
+        _disposeMemory = disposeMemory ?? (() => { });
         Profile = profile;
         _verificationFeatureKey = verificationFeatureKey;
+        _allowInvulnerabilityCompanion = allowInvulnerabilityCompanion;
+
+        // 附加當下就必須確認離線；失敗時尚未啟動任何背景工作，不留下需要清理的鎖服務。
+        EnsureOffline();
+
+        // 線上防護是所有鎖共用的前置條件，交給鎖服務每個週期只跑一次；
+        // 若放進每個鎖的委派，成本會隨啟用功能數量線性增加。
+        _locks = new ValueLockService(
+            stopAllOnFailure: true,
+            guard: EnsureOffline,
+            guardKey: SafetyGuardKey);
         _locks.LockFailed += Locks_LockFailed;
-        _locks.Set(SafetyGuardKey, EnsureOffline);
     }
 
     public GameVersionProfile Profile { get; }
 
-    public bool IsAttached => !_disposed && !_memory.HasExited;
+    public bool IsAttached => !_disposed && !_hasExited();
 
     public event EventHandler<TrainerSafetyStopEventArgs>? SafetyStopped;
 
@@ -82,12 +125,23 @@ public sealed class TrainerSession : IAsyncDisposable
         ProfileMatchResult match = catalog.Match(fingerprint);
         GameVersionProfile profile = match.Profile
             ?? throw new InvalidOperationException(match.Error ?? "目前 offsets.json 不支援這個遊戲版本。");
-        TrainerProfilePolicy.RequireDevelopmentVerification(
-            profile,
-            expectedProfileId,
-            featureKey,
-            expectedKind,
-            duration);
+        if (expectedKind == FeatureKind.Hook)
+        {
+            TrainerProfilePolicy.RequireDevelopmentHookVerification(
+                profile,
+                expectedProfileId,
+                featureKey,
+                duration);
+        }
+        else
+        {
+            TrainerProfilePolicy.RequireDevelopmentVerification(
+                profile,
+                expectedProfileId,
+                featureKey,
+                expectedKind,
+                duration);
+        }
 
         ProcessMemorySession memory = ProcessMemorySession.Attach();
         try
@@ -101,56 +155,120 @@ public sealed class TrainerSession : IAsyncDisposable
         }
     }
 
+    internal static TrainerSession AttachForForcedItemBehaviorVerification(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        TimeSpan duration)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath);
+        GameVersionProfile profile = catalog.Match(fingerprint).Profile
+            ?? throw new InvalidOperationException("目前 offsets.json 不支援這個遊戲版本。");
+        TrainerProfilePolicy.RequireDevelopmentHookVerification(
+            profile,
+            expectedProfileId,
+            "forceLevelUpItem",
+            duration);
+        TrainerProfilePolicy.RequireDevelopmentVerification(
+            profile,
+            expectedProfileId,
+            "invulnerability",
+            FeatureKind.Value,
+            TrainerProfilePolicy.MaximumVerificationDuration);
+
+        ProcessMemorySession memory = ProcessMemorySession.Attach();
+        try
+        {
+            return new TrainerSession(
+                memory,
+                profile,
+                "forceLevelUpItem",
+                allowInvulnerabilityCompanion: true);
+        }
+        catch
+        {
+            memory.Dispose();
+            throw;
+        }
+    }
+
     public void EnableValueLock(string featureKey, double value)
     {
-        lock (_stateGate)
-        {
-            ThrowIfUnavailable();
-            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            nint address = Resolve(feature.Address);
-            byte[] desired = EncodeValue(feature.ValueType, value);
-            _originalValues.TryAdd(featureKey, _memory.ReadBytes(address, desired.Length));
-            _locks.Set(featureKey, () =>
-            {
-                EnsureOffline();
-                if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, desired.Length)) == 0)
-                {
-                    return;
-                }
-
-                _memory.WriteBytes(address, desired);
-            });
-        }
+        EnableComputedLock(
+            featureKey,
+            feature => ValidateValueRange(featureKey, feature, value),
+            (_, _) => value,
+            honorPreserveZero: true);
     }
 
     public void EnableMultiplierLock(string featureKey, double multiplier)
     {
-        ThrowIfUnavailable();
         if (!double.IsFinite(multiplier) || multiplier < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(multiplier));
         }
 
+        EnableComputedLock(
+            featureKey,
+            validate: null,
+            (_, original) => original * multiplier,
+            honorPreserveZero: true);
+    }
+
+    public void EnableAdditiveLock(string featureKey, double amount)
+    {
+        if (!double.IsFinite(amount))
+        {
+            throw new ArgumentOutOfRangeException(nameof(amount));
+        }
+
+        EnableComputedLock(
+            featureKey,
+            validate: null,
+            (_, original) => original + amount,
+            honorPreserveZero: false);
+    }
+
+    /// <summary>
+    /// 三種鎖只差在目標值怎麼算與是否尊重 <see cref="FeatureDefinition.PreserveZero"/>；
+    /// 位址解析、原始值快照與寫入委派完全相同。
+    /// </summary>
+    private void EnableComputedLock(
+        string featureKey,
+        Action<FeatureDefinition>? validate,
+        Func<FeatureDefinition, double, double> computeTarget,
+        bool honorPreserveZero)
+    {
         lock (_stateGate)
         {
             ThrowIfUnavailable();
             FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            validate?.Invoke(feature);
+
             nint address = Resolve(feature.Address);
             int size = GetValueSize(feature.ValueType);
-            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
-            {
-                original = _memory.ReadBytes(address, size);
-                _originalValues.Add(featureKey, original);
-            }
-
-            double originalValue = DecodeValue(feature.ValueType, original);
-            byte[] desired = EncodeValue(feature.ValueType, originalValue * multiplier);
+            OriginalValueSnapshot snapshot = CaptureOriginalValue(featureKey, address, size);
+            MemoryValueType valueType = feature.ValueType;
+            byte[] desired = EncodeValue(
+                valueType,
+                computeTarget(feature, DecodeValue(valueType, snapshot.Bytes)));
+            bool preserveZero = honorPreserveZero && feature.PreserveZero;
             _locks.Set(featureKey, () =>
             {
-                EnsureOffline();
-                if (feature.PreserveZero && DecodeValue(feature.ValueType, _memory.ReadBytes(address, size)) == 0)
+                if (preserveZero)
                 {
-                    return;
+                    Span<byte> current = stackalloc byte[size];
+                    _memory.ReadBytes(address, current);
+                    if (DecodeValue(valueType, current) == 0)
+                    {
+                        return;
+                    }
                 }
 
                 _memory.WriteBytes(address, desired);
@@ -158,33 +276,15 @@ public sealed class TrainerSession : IAsyncDisposable
         }
     }
 
-    public void EnableAdditiveLock(string featureKey, double amount)
+    private OriginalValueSnapshot CaptureOriginalValue(string featureKey, nint address, int size)
     {
-        ThrowIfUnavailable();
-        if (!double.IsFinite(amount))
+        if (!_originalValues.TryGetValue(featureKey, out OriginalValueSnapshot? snapshot))
         {
-            throw new ArgumentOutOfRangeException(nameof(amount));
+            snapshot = new OriginalValueSnapshot(address, _memory.ReadBytes(address, size));
+            _originalValues.Add(featureKey, snapshot);
         }
 
-        lock (_stateGate)
-        {
-            ThrowIfUnavailable();
-            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            nint address = Resolve(feature.Address);
-            int size = GetValueSize(feature.ValueType);
-            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
-            {
-                original = _memory.ReadBytes(address, size);
-                _originalValues.Add(featureKey, original);
-            }
-
-            byte[] desired = EncodeValue(feature.ValueType, DecodeValue(feature.ValueType, original) + amount);
-            _locks.Set(featureKey, () =>
-            {
-                EnsureOffline();
-                _memory.WriteBytes(address, desired);
-            });
-        }
+        return snapshot;
     }
 
     public void DisableValueLock(string featureKey, bool restoreOriginal = true)
@@ -193,14 +293,66 @@ public sealed class TrainerSession : IAsyncDisposable
         {
             ThrowIfUnavailable();
             _locks.Remove(featureKey);
-            if (!restoreOriginal || !_originalValues.TryGetValue(featureKey, out byte[]? original))
+            if (!restoreOriginal
+                || !_originalValues.TryGetValue(featureKey, out OriginalValueSnapshot? snapshot))
             {
                 return;
             }
 
-            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            _ = WriteValueAndVerify(feature.Address, original);
+            _ = GetFeature(featureKey, FeatureKind.Value);
+            _ = WriteValueAtAndVerify(snapshot.Address, snapshot.Bytes);
             _originalValues.Remove(featureKey);
+        }
+    }
+
+    public double ReadValue(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            Span<byte> bytes = stackalloc byte[GetValueSize(feature.ValueType)];
+            _memory.ReadBytes(Resolve(feature.Address), bytes);
+            return DecodeValue(feature.ValueType, bytes);
+        }
+    }
+
+    public double WriteValue(string featureKey, double value)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
+            ValidateValueRange(featureKey, feature, value);
+            byte[] desired = EncodeValue(feature.ValueType, value);
+
+            EnsureOffline();
+            nint address = Resolve(feature.Address);
+            byte[] original = _memory.ReadBytes(address, desired.Length);
+            try
+            {
+                byte[] verification = WriteValueAtAndVerify(address, desired);
+                EnsureOffline();
+                return DecodeValue(feature.ValueType, verification);
+            }
+            catch (Exception writeError)
+            {
+                try
+                {
+                    _ = WriteValueAtAndVerify(address, original);
+                }
+                catch (Exception restoreError)
+                {
+                    throw new AggregateException(
+                        $"寫入 {featureKey} 失敗，且原始值還原失敗。",
+                        writeError,
+                        restoreError);
+                }
+
+                throw new InvalidOperationException(
+                    $"寫入 {featureKey} 失敗，原始值已還原。",
+                    writeError);
+            }
         }
     }
 
@@ -241,16 +393,35 @@ public sealed class TrainerSession : IAsyncDisposable
         }
     }
 
-    internal double ReadValueForVerification(string featureKey)
+    public void EnableForcedLevelUpItem(int itemId)
+    {
+        if (itemId <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(itemId));
+        }
+
+        ArmHook(
+            "forceLevelUpItem",
+            TrainerHookPayloadFactory.CreateForcedLevelUpItem,
+            hook => hook.WriteData(TrainerHookPayloadFactory.ItemId, BitConverter.GetBytes(itemId)));
+    }
+
+    public void DisableForcedLevelUpItem()
     {
         lock (_stateGate)
         {
             ThrowIfUnavailable();
-            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            int size = GetValueSize(feature.ValueType);
-            return DecodeValue(feature.ValueType, _memory.ReadBytes(Resolve(feature.Address), size));
+            RemoveHook("forceLevelUpItem");
         }
     }
+
+    public void TriggerDuplicateNextWeapon() =>
+        ArmHook("duplicateNextWeapon", TrainerHookPayloadFactory.CreateDuplicateNext);
+
+    public void TriggerDuplicateNextAccessory() =>
+        ArmHook("duplicateNextAccessory", TrainerHookPayloadFactory.CreateDuplicateNext);
+
+    internal double ReadValueForVerification(string featureKey) => ReadValue(featureKey);
 
     internal double RestoreValueForVerification(string featureKey)
     {
@@ -259,12 +430,12 @@ public sealed class TrainerSession : IAsyncDisposable
             ThrowIfUnavailable();
             _locks.Remove(featureKey);
             FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Value);
-            if (!_originalValues.TryGetValue(featureKey, out byte[]? original))
+            if (!_originalValues.TryGetValue(featureKey, out OriginalValueSnapshot? snapshot))
             {
                 throw new InvalidOperationException($"功能 {featureKey} 沒有可還原的原始值。");
             }
 
-            byte[] restored = WriteValueAndVerify(feature.Address, original);
+            byte[] restored = WriteValueAtAndVerify(snapshot.Address, snapshot.Bytes);
             _originalValues.Remove(featureKey);
             return DecodeValue(feature.ValueType, restored);
         }
@@ -287,6 +458,40 @@ public sealed class TrainerSession : IAsyncDisposable
         }
     }
 
+    internal bool HookMatchesOriginalForVerification(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Hook);
+            byte[] expected = ParseBytes(feature.ExpectedBytes, "expectedBytes");
+            return _memory.ReadBytes(Resolve(feature.Address), expected.Length)
+                .AsSpan()
+                .SequenceEqual(expected);
+        }
+    }
+
+    internal bool HookJumpInstalledForVerification(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Hook);
+            return _hooks.ContainsKey(featureKey)
+                && _memory.ReadBytes(Resolve(feature.Address), 1)[0] == 0xE9;
+        }
+    }
+
+    internal void DisableHookForVerification(string featureKey)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            _ = GetFeature(featureKey, FeatureKind.Hook);
+            RemoveHook(featureKey);
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         lock (_stateGate)
@@ -306,7 +511,7 @@ public sealed class TrainerSession : IAsyncDisposable
             await _locks.DisposeAsync();
             lock (_stateGate)
             {
-                if (!_memory.HasExited)
+                if (!_hasExited())
                 {
                     restorationError = RestoreActiveState();
                 }
@@ -314,7 +519,7 @@ public sealed class TrainerSession : IAsyncDisposable
         }
         finally
         {
-            _memory.Dispose();
+            _disposeMemory();
         }
 
         if (restorationError is not null)
@@ -346,7 +551,7 @@ public sealed class TrainerSession : IAsyncDisposable
 
             _safetyStopCause = args.Exception;
             _locks.Clear();
-            restorationError = _memory.HasExited ? null : RestoreActiveState();
+            restorationError = _hasExited() ? null : RestoreActiveState();
         }
 
         try
@@ -362,6 +567,19 @@ public sealed class TrainerSession : IAsyncDisposable
     private Exception? RestoreActiveState()
     {
         Exception? restorationError = null;
+        foreach ((string key, RemoteCodeHook hook) in _hooks.ToArray())
+        {
+            try
+            {
+                hook.Dispose();
+                _hooks.Remove(key);
+            }
+            catch (Exception exception)
+            {
+                restorationError ??= exception;
+            }
+        }
+
         foreach ((string key, MemoryPatchSet patch) in _patches.ToArray())
         {
             try
@@ -375,7 +593,7 @@ public sealed class TrainerSession : IAsyncDisposable
             }
         }
 
-        foreach ((string key, byte[] original) in _originalValues.ToArray())
+        foreach ((string key, OriginalValueSnapshot snapshot) in _originalValues.ToArray())
         {
             if (!Profile.Features.TryGetValue(key, out FeatureDefinition? feature))
             {
@@ -384,7 +602,7 @@ public sealed class TrainerSession : IAsyncDisposable
 
             try
             {
-                _ = WriteValueAndVerify(feature.Address, original);
+                _ = WriteValueAtAndVerify(snapshot.Address, snapshot.Bytes);
                 _originalValues.Remove(key);
             }
             catch (Exception exception)
@@ -398,13 +616,87 @@ public sealed class TrainerSession : IAsyncDisposable
 
     private nint Resolve(AddressDefinition definition)
     {
-        return ProfileAddressResolver.Resolve(_memory, definition);
+        return _addressResolver(definition);
+    }
+
+    /// <summary>
+    /// 安裝（或沿用）hook、寫入選用的參數後再拉起啟用旗標；
+    /// 任何一步失敗都會移除 hook，還原不完整時以 <see cref="AggregateException"/> 回報。
+    /// </summary>
+    private void ArmHook(
+        string featureKey,
+        RemoteHookPayloadBuilder payloadBuilder,
+        Action<RemoteCodeHook>? configure = null)
+    {
+        lock (_stateGate)
+        {
+            ThrowIfUnavailable();
+            EnsureOffline();
+            RemoteCodeHook hook = GetOrInstallHook(featureKey, payloadBuilder);
+            try
+            {
+                configure?.Invoke(hook);
+                hook.WriteData(TrainerHookPayloadFactory.EnabledFlag, [1]);
+                EnsureOffline();
+            }
+            catch (Exception mutationError)
+            {
+                try
+                {
+                    RemoveHook(featureKey);
+                }
+                catch (Exception cleanupError)
+                {
+                    throw new AggregateException(
+                        $"{featureKey} hook 啟動失敗，且清理未完整完成。",
+                        mutationError,
+                        cleanupError);
+                }
+
+                throw;
+            }
+        }
+    }
+
+    private RemoteCodeHook GetOrInstallHook(
+        string featureKey,
+        RemoteHookPayloadBuilder payloadBuilder)
+    {
+        if (_hooks.TryGetValue(featureKey, out RemoteCodeHook? existing))
+        {
+            return existing;
+        }
+
+        IRemoteCodeMemory memory = _remoteCodeMemory
+            ?? throw new InvalidOperationException("目前記憶體工作階段不支援遠端程式碼 hook。");
+        FeatureDefinition feature = GetFeature(featureKey, FeatureKind.Hook);
+        byte[] expected = ParseBytes(feature.ExpectedBytes, "expectedBytes");
+        RemoteCodeHook hook = RemoteCodeHook.Install(
+            memory,
+            Resolve(feature.Address),
+            expected,
+            payloadBuilder);
+        _hooks.Add(featureKey, hook);
+        return hook;
+    }
+
+    private void RemoveHook(string featureKey)
+    {
+        if (!_hooks.TryGetValue(featureKey, out RemoteCodeHook? hook))
+        {
+            return;
+        }
+
+        hook.Dispose();
+        _hooks.Remove(featureKey);
     }
 
     private FeatureDefinition GetFeature(string featureKey, FeatureKind kind)
     {
         if (_verificationFeatureKey is not null
-            && !string.Equals(_verificationFeatureKey, featureKey, StringComparison.Ordinal))
+            && !string.Equals(_verificationFeatureKey, featureKey, StringComparison.Ordinal)
+            && !(_allowInvulnerabilityCompanion
+                && string.Equals(featureKey, "invulnerability", StringComparison.Ordinal)))
         {
             throw new InvalidOperationException(
                 $"此開發驗證工作階段僅允許功能 {_verificationFeatureKey}，已拒絕 {featureKey}。");
@@ -467,6 +759,25 @@ public sealed class TrainerSession : IAsyncDisposable
         };
     }
 
+    private static void ValidateValueRange(
+        string featureKey,
+        FeatureDefinition feature,
+        double value)
+    {
+        if (!double.IsFinite(value)
+            || feature.MinValue is double minimum && value < minimum
+            || feature.MaxValue is double maximum && value > maximum)
+        {
+            string allowed = feature.MinValue is null && feature.MaxValue is null
+                ? "有限數值"
+                : $"{feature.MinValue?.ToString(CultureInfo.InvariantCulture) ?? "-∞"} 至 "
+                    + $"{feature.MaxValue?.ToString(CultureInfo.InvariantCulture) ?? "+∞"}";
+            throw new ArgumentOutOfRangeException(
+                nameof(value),
+                $"功能 {featureKey} 的值必須介於 {allowed}。");
+        }
+    }
+
     private static byte[] ParseBytes(string? value, string field)
     {
         if (string.IsNullOrWhiteSpace(value))
@@ -493,9 +804,8 @@ public sealed class TrainerSession : IAsyncDisposable
         return _memory.ReadBytes(Resolve(address), expected.Length).AsSpan().SequenceEqual(expected);
     }
 
-    private byte[] WriteValueAndVerify(AddressDefinition address, byte[] value)
+    private byte[] WriteValueAtAndVerify(nint resolved, ReadOnlySpan<byte> value)
     {
-        nint resolved = Resolve(address);
         _memory.WriteBytes(resolved, value);
         byte[] verification = _memory.ReadBytes(resolved, value.Length);
         if (!verification.AsSpan().SequenceEqual(value))
@@ -505,6 +815,8 @@ public sealed class TrainerSession : IAsyncDisposable
 
         return verification;
     }
+
+    private sealed record OriginalValueSnapshot(nint Address, byte[] Bytes);
 
     private void ThrowIfUnavailable()
     {
