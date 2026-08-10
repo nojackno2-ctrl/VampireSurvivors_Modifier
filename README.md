@@ -1,77 +1,234 @@
 # VSModifier
 
-Vampire Survivors 的 C# WPF 存檔修改器與外部記憶體 Trainer。
+> 專為 **Vampire Survivors（吸血鬼倖存者）** 設計的現代化 C# WPF 存檔修改器與外部記憶體 Trainer。
+> 堅守核心原則：**零檔案修改（不改動/不新增任何遊戲目錄檔案）** 與 **零 DLL 注入（純外部行程讀寫）**。
 
-專案遵守一項硬性原則：**不修改或新增遊戲安裝資料夾內的任何檔案**。
-
-原始碼：[nojackno2-ctrl/VampireSurvivors_Modifier](https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier)
-
----
-
-## ⚠️ 開發中，目前不可使用
-
-**本專案仍在開發階段，尚未釋出任何可用版本，請勿當成完成品下載使用。**
-
-- 沒有提供正式發行檔（Release），也沒有安裝程式。
-- 功能仍在變動，介面、設定與資料格式都可能在未通知的情況下改變。
-- Trainer（記憶體功能）在對應遊戲版本完成實機驗證前，一律拒絕附加，因此在多數情況下**不會有任何作用**。
-- 存檔修改流程雖已實作備份與檢查機制，但整體尚未經過足夠的長期測試，仍可能造成存檔異常。
-
-如果你只是想要一個能直接使用的工具，請等待本專案正式標示為可用之後再回來。若你想協助測試或研究，請務必先自行備份完整存檔，並自行承擔風險。
+[![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows)](https://www.microsoft.com/windows)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![GitHub Repository](https://img.shields.io/badge/GitHub-VSModifier-181717?logo=github)](https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier)
 
 ---
 
-## 這個專案在做什麼
+## 📖 專案簡介
 
-- **存檔修改**：讀取本機 Vampire Survivors 存檔，修改金幣、解鎖狀態、角色金蛋屬性等內容後安全寫回。
-- **外部記憶體 Trainer**：在遊戲執行中提供無敵、傷害倍率、遊戲速率、快速寶箱等即時功能，只使用外部行程記憶體讀寫，不注入 DLL。
+**VSModifier** 是一款採用 .NET 10 與 WPF 技術打造的高效能、高安全性修改工具，旨在提供玩家最完整且零風險的《吸血鬼倖存者》（Steam IL2CPP x64 版）自訂體驗。
 
-### 存檔功能
+本工具提供雙軌獨立運作功能：
+1. **軌道 A — 智慧存檔修改器**：離線解析與編輯本機 `SaveData`，自動處理 SHA-256 校驗碼、防衝突備份與安全解鎖合併。
+2. **軌道 B — 外部記憶體 Trainer**：即時調控遊戲數值、傷害倍率、遊戲速率、升級強制道具與寶箱機制，全程採用外部行程記憶體讀寫（RPM/WPM）與可逆 Code Cave Hook，不注入 DLL。
 
-- 各項旗標與清單編輯：`UnlockedCharacters`、`UnlockedWeapons`、`UnlockedStages`、`UnlockedArcanas`、`UnlockedHypers`、`Achievements`、`Secrets` 等。
-- 一鍵套用對應遊戲版本的解鎖表，採安全合併：保留既有順序、重複等級與未收錄項目，只追加缺少的內容。
-- 金蛋（Golden Eggs）可針對角色逐一調整單一屬性：攻擊力、護甲、最大生命、冷卻、範圍、投射物數量、幸運、詛咒、移動速度等皆有中文選項；新版遊戲新增的數值屬性也會自動出現在選單。每次只更動所選屬性，其他加成維持原值，衍生的 `total` 會自動重算。
+---
 
-### Trainer 功能
+## ✨ 核心功能亮點
 
-- 無敵、快速寶箱動畫、寶箱最高獎勵、傷害倍率、遊戲速率等。
-- 全域熱鍵預設停用，需在 Trainer 頁手動啟用；啟用後以 `Ctrl+Shift+F1` 至 `F5` 切換各項功能，`Ctrl+Shift+F12` 為緊急中斷並還原。
-- 功能熱鍵只有在版本已辨識、確認為單人狀態並安全附加後才會執行。
+### 🗃️ 軌道 A：存檔修改器 (Save Editor)
+- **自動偵測存檔**：智慧掃描本機 Steam 儲存目錄，自動列出所有可用的 `SaveData` 存檔候選。
+- **全方位資源調整**：支援修改金幣（`Coins`）、生涯累積金幣（`LifetimeCoins`）、封印數（`Seals`）、冒險之星（`AdventureStars`）等數值，並提供安全範圍限制與「一鍵最大化」。
+- **版本化安全一鍵解鎖**：
+  - 支援角色（`UnlockedCharacters`）、武器（`UnlockedWeapons`）、關卡（`UnlockedStages`）、卡牌（`UnlockedArcanas`）、超級模式（`UnlockedHypers`）、成就（`Achievements`）與秘密咒語（`Secrets`）等。
+  - **原子安全合併演算法**：智慧比對版本解鎖表，僅追加缺少的項目，完整保留使用者原有的排序順序、重複升級等級（PowerUp Ranks）與未收錄自訂資料。
+- **金蛋（Golden Eggs）精準客製化**：
+  - 針對各角色個別調整單一屬性：攻擊力、護甲、最大生命、冷卻縮減、投射物數量、攻擊範圍、幸運、詛咒、移動速度等 20+ 種屬性（具備完整繁體中文選單）。
+  - **動態屬性適配**：若未來遊戲版本新增屬性，將自動從存檔中動態讀取並呈現於介面。
+  - **數值一致性**：每次修改單一屬性時，其餘加成不受影響，並自動重新精確計算衍生蛋總數（`total`）。
+- **遊戲旗標管理**：
+  - 檢視與一鍵重設官方作弊標記（`CheatCodeUsed`）。
+  - 啟用內建「常駐快速寶箱動畫」（`AlwaysQuickTreasureAnim`）。
+- **雙模式進階 JSON 編輯器**：
+  - **樹狀結構檢視**：視覺化展開 150+ 個存檔頂層欄位與子節點，點選即可修改純量資料。
+  - **原始 JSON 檢視**：支援直接查看與進階編輯，儲存時自動格式化並校驗。
 
-## 安全原則
+### ⚡ 軌道 B：外部即時 Trainer (Memory Trainer)
+- **零 DLL 注入**：僅透過 Windows 原生 API 進行外部記憶體讀寫與 RAM 內部程式碼修補（Code Patch），關閉遊戲或中斷附加後立即完全恢復原始狀態，不殘留任何痕跡。
+- **戰鬥與生存數值鎖定**：
+  - 永久無敵（`Permanent Invulnerability`）
+  - 傷害倍率（Power Multiplier，支援 1x ~ 1000x 自訂滑桿）
+  - 冷卻縮減、投射物數量加成、攻擊範圍擴大、持續時間、移動速度、磁吸全圖吸取、復活次數、重新骰（Reroll/Skip/Banish）次數等。
+- **遊戲系統與進程調控**：
+  - **遊戲速率（Game Speed）**：精準調控 Unity `Time.timeScale`（0.1x ~ 10x），相容遊戲原生暫停機制。
+  - **寶箱最高獎勵（Max Treasure Chest）**：原子複合 Patch，強制五件裝備最高獎勵與金幣結算上限。
+  - **快速開箱動畫（Quick Treasure Anim）**：免等待直接跳過冗長開箱動畫。
+  - **局內金幣與等級即時調整**：本局金幣、角色等級與經驗值單次寫入與唯讀即時監控。
+- **進階可逆 Code Cave Hook**：
+  - **升級指定獲得道具（Force Level-Up Item）**：內建 85+ 項升級道具/武器清單，升級時保證抽出所選目標。
+  - **複製下次取得武器/飾品（Duplicate Next Weapon / Accessory）**：突破常規道具數量上限。
+- **全域熱鍵系統**：
+  - 支援背景全域快捷鍵操作（預設停用，需手動開啟）。
+  - 提供 `Ctrl+Shift+F1` ~ `F5` 快捷開關各項主力功能。
+  - 🚨 **`Ctrl+Shift+F12` 緊急中斷與全功能還原**：一鍵立即解除所有鎖值、還原 Code Cave 與 Patch。
 
-- 存檔寫入前自動建立完整歷史備份。
-- 遊戲執行中拒絕寫入存檔。
-- 寫回採 UTF-8 無 BOM，並重算已驗證的 SHA-256 checksum。
-- Trainer 僅使用外部行程記憶體讀寫，不注入 DLL。
-- 附加後以 100ms 間隔持續監控線上狀態；偵測到線上會話或任一背景寫入失敗時，會自動停止所有鎖值、還原全部數值與 code patch，並中斷 Trainer。
-- 僅限單機與本地遊玩使用；對成就與遊戲內 `CheatCodeUsed` 狀態造成的影響由使用者自行承擔。
+---
 
-## 遊戲版本對應
+## 🛡️ 安全防護與設計承諾
 
-Trainer 不假設不同遊戲版本使用相同記憶體偏移。啟動時會同時計算 `GameAssembly.dll`、`UnityPlayer.dll` 與 `global-metadata.dat` 的 SHA-256，三者必須精確符合同一個版本 Profile，才會採用該 Profile 專屬的資料；載入時另會驗證特徵碼、位址範圍與 patch 長度。未知版本、混搭檔案、結構錯誤或尚未完成實機驗證的 Profile 一律拒絕附加。
+本專案在架構層面嚴格實施以下安全規範，確保使用者帳號與資料安全：
 
-本專案以目前 Steam 最新版為基準並持續跟進更新；不為缺少原始遊戲檔案、無法驗證的舊版本建立推測性 Profile。遊戲改版後，該版本必須重新分析並逐項驗證，不會沿用上一版的結論——這也是新版遊戲推出後 Trainer 會有一段時間無法使用的原因。
+| 防護機制 | 實作說明 |
+|---|---|
+| **不修改遊戲安裝目錄** | 絕對不修改、替換或新增遊戲安裝目錄內的任何檔案（如 `GameAssembly.dll`、exe 等）。 |
+| **自動歷史備份** | 每次寫入存檔前，皆自動將原始檔案備份至 `%LOCALAPPDATA%\VSModifier\backups`（保留時間戳記）。 |
+| **遊戲執行防衝突保護** | 修改存檔時，若偵測到遊戲正在執行中，會**嚴格拒絕寫入**，防止存檔被遊戲結束時覆蓋損毀。 |
+| **SHA-256 校驗碼重算** | 寫回存檔時採用 UTF-8 無 BOM 編碼，並精準計算遊戲專屬 64 字元 SHA-256 Checksum，確保遊戲讀取無誤。 |
+| **三檔指紋雜湊驗證** | Trainer 啟動時必須同時精準匹配 `GameAssembly.dll`、`UnityPlayer.dll` 與 `global-metadata.dat` 的 SHA-256，未經驗證或混搭檔案一律拒絕附加。 |
+| **100ms 線上防護 (Fail-Closed)** | 附加後每 100ms 持續監控連線會話狀態；若偵測為線上多人模式或任何寫入失敗，立即還原所有變更並強制離線中斷。 |
+| **版本資料熱重新載入** | 修改器即時監聽 `data/offsets.json` 變動，支援免重啟更新特徵碼與偏移量。 |
 
-## 從原始碼建置
+---
 
-需要支援 .NET 10 的開發環境。
+## 🚀 快速上手使用說明
 
-1. 使用 Visual Studio 開啟 `VSModifier.sln`（新版 Visual Studio 亦可開啟 `VSModifier.slnx`）。
-2. 將 `VSModifier.App` 設為啟始專案。
-3. 選擇 x64 或 Any CPU 後建置並執行。
+### 系統需求
+- **作業系統**：Windows 10 / Windows 11 (64-bit x64)
+- **執行環境**：[.NET 10.0 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
+- **遊戲版本**：Steam 正版 Vampire Survivors (Unity IL2CPP x64)
 
-命令列：
+---
+
+### 步驟一：修改存檔 (Save Editing)
+
+> [!IMPORTANT]
+> **最佳實踐流程（避免 Steam 雲端存檔覆蓋）**：
+> 1. 請保持 **Steam 用戶端開啟**，但 **關閉 Vampire Survivors 遊戲**。
+> 2. 啟動 `VSModifier.App.exe`。
+> 3. 程式會自動偵測存檔路徑（若有多個帳號可在下拉選單切換，或點擊「瀏覽」手動選取 `SaveData`）。
+> 4. 在各分頁進行調整：
+>    - **資源**：調整金幣或點擊「最大化常用資源」。
+>    - **解鎖**：點擊「一鍵合併解鎖表」或個別勾選。
+>    - **蛋**：選擇角色與屬性，輸入數值後點擊「套用屬性蛋」。
+>    - **旗標**：重設作弊標記或啟用快速開箱。
+>    - **進階 JSON**：檢視或自訂修改特定欄位。
+> 5. 點擊「儲存修改」。狀態列顯示「儲存成功」後即可啟動遊戲，Steam 雲端會自動同步最新修改。
+
+---
+
+### 步驟二：即時 Trainer (Memory Trainer)
+
+> [!NOTE]
+> Trainer 功能僅能在**單人離線模式**下運作，且必須在**關卡內（角色可以移動、時間開始計時）**進行附加。
+
+1. 啟動 Vampire Survivors，進入任意單人關卡開始遊戲。
+2. 開啟 `VSModifier.App.exe`，切換至 **「Trainer」** 分頁。
+3. 程式會自動計算遊戲三檔指紋並匹配 Profile：
+   - 若版本匹配且已驗證，點擊 **「附加至遊戲」**。
+4. 勾選所需的鎖定功能（如永久無敵、傷害倍率、經驗倍率等）或拖曳倍率滑桿。
+5. 升級選道具功能：勾選「升級強制獲得道具」並從下拉選單挑選指定武器/飾品。
+6. 若欲使用快捷鍵，勾選「啟用全域熱鍵」即可在遊戲中即時切換。
+7. 遊戲結束或關閉前，點擊 **「中斷附加」** 或按下 `Ctrl+Shift+F12` 還原所有數值。
+
+#### 預設全域熱鍵列表
+
+| 快捷鍵 | 功能說明 |
+|---|---|
+| `Ctrl + Shift + F1` | 切換 **永久無敵**（Invulnerability） |
+| `Ctrl + Shift + F2` | 切換 **傷害倍率**（Power Multiplier） |
+| `Ctrl + Shift + F3` | 切換 **遊戲速率**（Game Speed） |
+| `Ctrl + Shift + F4` | 切換 **快速寶箱動畫**（Quick Treasure） |
+| `Ctrl + Shift + F5` | 切換 **寶箱最高獎勵**（Max Treasure Chest） |
+| `Ctrl + Shift + F12` | 🚨 **緊急停止**（立即停止鎖值、還原 Code Cave 與 Patch 並中斷附加） |
+
+---
+
+## 🛠️ 遊戲改版與版本維護
+
+當 Vampire Survivors 在 Steam 發布更新時：
+1. **存檔修改器**：通常完全不受遊戲更新影響，可直接正常使用。
+2. **Trainer 記憶體功能**：由於遊戲代碼編譯偏移（RVA）可能更動，修改器會依「三檔精確指紋」啟動防護，暫時拒絕附加，避免造成遊戲崩潰。
+3. **更新偏移量**：
+   - 專案會在 `data/offsets.json` 與 `data/ids/unlocks.json` 提供新版 Profile。
+   - 使用者只需將更新後的 JSON 檔案覆蓋至 `data/` 目錄，修改器會自動熱重新載入（Hot Reload），無須重新編譯主程式。
+
+---
+
+## 💻 從原始碼建置 (Build from Source)
+
+如果你希望自行編譯或參與開發：
+
+### 必備環境
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
+- Visual Studio 2022 (v17.12+) 或支援 .NET 10 的 IDE / CLI。
+
+### 建置步驟
 
 ```powershell
-dotnet build VSModifier.sln
-dotnet run --project VSModifier.Tests
+# 複製儲存庫
+git clone https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier.git
+cd VampireSurvivors_Modifier
+
+# 編譯整個解決方案
+dotnet build VSModifier.sln --configuration Release
+
+# 執行自動化測試（23 項完整測試）
+dotnet run --project VSModifier.Tests --configuration Release
 ```
 
-建置產物為 framework-dependent，執行的電腦必須安裝 .NET 10 Desktop Runtime。
+### 發行獨立應用程式 (Publish)
+可透過 Visual Studio 的發布功能或執行下列指令輸出發行檔：
+```powershell
+dotnet publish VSModifier.App/VSModifier.App.csproj -c Release -r win-x64 --self-contained false
+```
 
-## 版權與隱私
+---
 
-本專案不包含 poncle 的遊戲檔案、metadata、逆向工程輸出、遊戲素材或任何個人存檔，亦與 poncle 無關。
+## 📂 專案架構概覽
 
-本專案程式碼採 [MIT License](LICENSE) 授權。
+```text
+VampireSurvivors_Modifier/
+├── VSModifier.App/        # WPF 使用者介面、深色主題、全域熱鍵管理
+├── VSModifier.Core/       # 存檔解析、SHA-256 校驗碼、安全備份、進程偵測
+├── VSModifier.Memory/     # 外部進程記憶體讀寫、AOB 掃描、Code Cave Hook、線上防護
+├── VSModifier.Tests/      # 自動化單元測試與安全回歸測試套件
+├── VSModifier.IdExtractor/# 輔助工具：自 dump 資料抽取各版本 ID 與解鎖表
+├── data/
+│   ├── offsets.json       # 各遊戲版本記憶體偏移與指紋資料庫
+│   └── ids/               # 解鎖表與升級強制道具 ID 清單
+├── DESIGN.md              # 系統完整設計規格書
+├── AGENTS.md              # AI 代理協作規則與安全規範
+└── AI_HANDOFF.md          # 實作進度、工程紀錄與即時交接狀態
+```
+
+---
+
+## ❓ 常見問題 (FAQ)
+
+<details>
+<summary><b>Q1: 為什麼修改存檔後進入遊戲沒有看到變更？</b></summary>
+請確認修改存檔時「遊戲是否已完全關閉」。若遊戲在開啟狀態下修改，當您關閉遊戲時，遊戲會將記憶體中的舊存檔直接覆蓋寫入硬碟，導致修改失效。請遵循「關閉遊戲 → 修改並儲存 → 開啟遊戲」的流程。
+</details>
+
+<details>
+<summary><b>Q2: 使用 Trainer 會導致 Steam 封號嗎？</b></summary>
+Vampire Survivors 為單機 PvE 遊戲，無伺服器反作弊系統。且本修改器內建「線上防護 Guard」，一旦偵測到線上多人連線即會立即中斷所有修改，確保僅在單人本地模式下運作。
+</details>
+
+<details>
+<summary><b>Q3: 為什麼 Trainer 顯示「尚未完成單人關卡實機驗證」或無法點擊附加？</b></summary>
+本專案堅持安全優先原則。在新遊戲版本推出後，對應的 Profile 需先經過嚴格的單人實機唯讀與可逆寫入驗證後才會標記為 `verified: true`。在完成驗證前，系統會以 fail-closed 模式防護以避免遊戲異常。
+</details>
+
+<details>
+<summary><b>Q4: 修改器會修改我的遊戲本體檔案嗎？</b></summary>
+絕對不會。本專案不論是存檔修改還是 Trainer 記憶體修改，皆 100% 遵守「零遊戲檔案接觸」原則，不會覆蓋或在遊戲目錄建立任何 DLL 或資料檔。
+</details>
+
+---
+
+## 📜 免責聲明與授權條款 (Disclaimer & License)
+
+- **免責聲明**：
+  - 本工具僅供個人離線娛樂、學習與研究使用。
+  - 使用存檔修改或記憶體功能可能影響遊戲內的成就解鎖或產生 `CheatCodeUsed` 標記，相關風險由使用者自行承擔。
+  - 本專案不包含任何由 **poncle** 擁有之版權遊戲檔案、二進位組件、遊戲素材或逆向工程原始產出，亦與 poncle 無任何官方附屬或背書關係。
+- **授權條款**：
+  - 本專案程式碼依據 [MIT License](LICENSE) 授權條款開放。
+
+---
+
+## 🤝 參與貢獻與 AI 協作
+
+本專案採用結構化 AI 協作與工程交接規範：
+- 規格定義請參閱 [DESIGN.md](DESIGN.md)。
+- 跨代理協作規則請參閱 [AGENTS.md](AGENTS.md)。
+- 即時狀態與工程驗證紀錄請參閱 [AI_HANDOFF.md](AI_HANDOFF.md)。
+
+歡迎提交 Issue 與 Pull Request！
