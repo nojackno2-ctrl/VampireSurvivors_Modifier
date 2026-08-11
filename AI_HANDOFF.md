@@ -1,5 +1,14 @@
 # AI Handoff
 
+## 分支整合與清理維護（2026-08-12）
+
+- 已檢查本地與遠端 Git 儲存庫分支狀態：
+  - PR #1 (`agent/initial-public-release`) 與 PR #2 (`claude/readme-traditional-chinese-fvg4vi`) 均已完整合併至主分支 `main`。
+  - 本地僅保留 `main`，且與 `origin/main` 保持完全同步（HEAD: `f7c6199`）。
+  - 已完成遠端已合併分支 `origin/claude/readme-traditional-chinese-fvg4vi` 的刪除與 `git fetch --all --prune` 修剪。
+  - 目前所有本機及遠端多餘分支已全數清理完畢，乾淨只留 `main` 分支。
+- 驗證狀態：全方案建置維持 0 警告 / 0 錯誤，全套 23/23 測試持續通過。
+
 ## 對外公開繁體中文 README 更新（2026-08-10）
 
 - 已全面重寫與完善 `README.md`，採用繁體中文對外公開格式：
@@ -41,7 +50,7 @@
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
 5. 2026-07-23 新三檔 Profile 已完成重新抽取、靜態更新與熱重新載入支援；接著進入任一單人關卡，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
-最近重要 Commit：`e3347dc`（Trainer 版本資料熱重新載入）、`40a9949`（2026-07-23 遊戲版本資料）、`74fbdab`（受控 Trainer 實機驗證流程）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。兩個最新 commit 尚未 push，接手時仍務必以 Git log、status 與 diff 為準。
+最近重要 Commit：`f7c6199`（更新繁體中文 README 與 AI_HANDOFF）、`f664f5d`（Merge PR #2）、`4a3aaed`（Merge PR #1）、`e3347dc`（Trainer 版本資料熱重新載入）、`40a9949`（2026-07-23 遊戲版本資料）、`74fbdab`（受控 Trainer 實機驗證流程）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；PR #1 與 PR #2 均已併入 `main`，目前僅維護單一 `main` 分支且已與 `origin/main` 保持完全同步。
 
 ## 已確認環境
 
