@@ -1,7 +1,7 @@
 # VSModifier
 
-> 專為 **Vampire Survivors（吸血鬼倖存者）** 設計的現代化 C# WPF 存檔修改器與外部記憶體 Trainer。
-> 堅守核心原則：**零檔案修改（不改動/不新增任何遊戲目錄檔案）** 與 **零 DLL 注入（純外部行程讀寫）**。
+> 專為 **Vampire Survivors（吸血鬼倖存者）** 設計的 C# WPF 安全存檔修改器。
+> v1.0.0 不會修改遊戲安裝目錄；Trainer 僅保留為停用且未驗證的開發預覽。
 
 [![.NET 10](https://img.shields.io/badge/.NET-10.0-512BD4?logo=dotnet)](https://dotnet.microsoft.com/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20x64-0078D6?logo=windows)](https://www.microsoft.com/windows)
@@ -12,11 +12,14 @@
 
 ## 📖 專案簡介
 
-**VSModifier** 是一款採用 .NET 10 與 WPF 技術打造的高效能、高安全性修改工具，旨在提供玩家最完整且零風險的《吸血鬼倖存者》（Steam IL2CPP x64 版）自訂體驗。
+**VSModifier** 是一款採用 .NET 10 與 WPF 技術打造、以備份與拒絕危險寫入為核心的《吸血鬼倖存者》存檔修改工具。
 
-本工具提供雙軌獨立運作功能：
-1. **軌道 A — 智慧存檔修改器**：離線解析與編輯本機 `SaveData`，自動處理 SHA-256 校驗碼、防衝突備份與安全解鎖合併。
-2. **軌道 B — 外部記憶體 Trainer**：即時調控遊戲數值、傷害倍率、遊戲速率、升級強制道具與寶箱機制，全程採用外部行程記憶體讀寫（RPM/WPM）與可逆 Code Cave Hook，不注入 DLL。
+> [!IMPORTANT]
+> **v1.0.0 的正式可用範圍是安全存檔編輯器。** 隨附的所有 Trainer Profile 都是 `verified: false`，正式版會 fail-closed 拒絕附加。此版本沒有 Trainer 功能或遊戲內效果的實機驗證聲明。
+
+本專案保留兩條開發軌道：
+1. **軌道 A — 安全存檔修改器（v1.0.0 正式支援）**：離線解析與編輯本機 `SaveData`，自動處理 SHA-256 校驗碼、防衝突備份與安全解鎖合併。
+2. **軌道 B — 外部記憶體 Trainer（v1.0.0 停用）**：程式碼採外部行程讀寫與可逆記憶體修補設計，但目前 Profile 未驗證，正式版不允許附加。
 
 ---
 
@@ -39,7 +42,9 @@
   - **樹狀結構檢視**：視覺化展開 150+ 個存檔頂層欄位與子節點，點選即可修改純量資料。
   - **原始 JSON 檢視**：支援直接查看與進階編輯，儲存時自動格式化並校驗。
 
-### ⚡ 軌道 B：外部即時 Trainer (Memory Trainer)
+### ⚡ 軌道 B：外部即時 Trainer（停用的開發預覽）
+
+以下是保留於程式碼中的設計範圍，不是 v1.0.0 可用功能清單。所有隨附 Profile 均為 `verified: false`，正式版附加會被拒絕。
 - **零 DLL 注入**：僅透過 Windows 原生 API 進行外部記憶體讀寫與 RAM 內部程式碼修補（Code Patch），關閉遊戲或中斷附加後立即完全恢復原始狀態，不殘留任何痕跡。
 - **戰鬥與生存數值鎖定**：
   - 永久無敵（`Permanent Invulnerability`）
@@ -80,7 +85,7 @@
 
 ### 系統需求
 - **作業系統**：Windows 10 / Windows 11 (64-bit x64)
-- **執行環境**：[.NET 10.0 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/10.0)
+- **執行環境**：官方 portable ZIP 已包含所需的 .NET 執行環境，不需另行安裝 .NET Desktop Runtime。
 - **遊戲版本**：Steam 正版 Vampire Survivors (Unity IL2CPP x64)
 
 ---
@@ -102,30 +107,9 @@
 
 ---
 
-### 步驟二：即時 Trainer (Memory Trainer)
+### Trainer 狀態
 
-> [!NOTE]
-> Trainer 功能僅能在**單人離線模式**下運作，且必須在**關卡內（角色可以移動、時間開始計時）**進行附加。
-
-1. 啟動 Vampire Survivors，進入任意單人關卡開始遊戲。
-2. 開啟 `VSModifier.App.exe`，切換至 **「Trainer」** 分頁。
-3. 程式會自動計算遊戲三檔指紋並匹配 Profile：
-   - 若版本匹配且已驗證，點擊 **「附加至遊戲」**。
-4. 勾選所需的鎖定功能（如永久無敵、傷害倍率、經驗倍率等）或拖曳倍率滑桿。
-5. 升級選道具功能：勾選「升級強制獲得道具」並從下拉選單挑選指定武器/飾品。
-6. 若欲使用快捷鍵，勾選「啟用全域熱鍵」即可在遊戲中即時切換。
-7. 遊戲結束或關閉前，點擊 **「中斷附加」** 或按下 `Ctrl+Shift+F12` 還原所有數值。
-
-#### 預設全域熱鍵列表
-
-| 快捷鍵 | 功能說明 |
-|---|---|
-| `Ctrl + Shift + F1` | 切換 **永久無敵**（Invulnerability） |
-| `Ctrl + Shift + F2` | 切換 **傷害倍率**（Power Multiplier） |
-| `Ctrl + Shift + F3` | 切換 **遊戲速率**（Game Speed） |
-| `Ctrl + Shift + F4` | 切換 **快速寶箱動畫**（Quick Treasure） |
-| `Ctrl + Shift + F5` | 切換 **寶箱最高獎勵**（Max Treasure Chest） |
-| `Ctrl + Shift + F12` | 🚨 **緊急停止**（立即停止鎖值、還原 Code Cave 與 Patch 並中斷附加） |
+v1.0.0 不提供可操作的 Trainer。所有隨附 Profile 均保持 `verified: false`，因此正式版會以 fail-closed 模式拒絕附加。待未來完成特定遊戲版本的離線實機驗證後，才會另行說明可用範圍；目前請只使用存檔編輯功能。
 
 ---
 
@@ -163,9 +147,9 @@ dotnet run --project VSModifier.Tests --configuration Release
 ```
 
 ### 發行獨立應用程式 (Publish)
-可透過 Visual Studio 的發布功能或執行下列指令輸出發行檔：
+使用與 CI / GitHub Release 相同的腳本建立 self-contained `win-x64` portable ZIP、驗證檔案版本、執行內容黑名單稽核並產生 `SHA256SUMS`：
 ```powershell
-dotnet publish VSModifier.App/VSModifier.App.csproj -c Release -r win-x64 --self-contained false
+./scripts/build-release.ps1
 ```
 
 ---
@@ -198,12 +182,12 @@ VampireSurvivors_Modifier/
 
 <details>
 <summary><b>Q2: 使用 Trainer 會導致 Steam 封號嗎？</b></summary>
-Vampire Survivors 為單機 PvE 遊戲，無伺服器反作弊系統。且本修改器內建「線上防護 Guard」，一旦偵測到線上多人連線即會立即中斷所有修改，確保僅在單人本地模式下運作。
+v1.0.0 的 Trainer 已停用且未經遊戲內效果驗證，因此本版本不提供 Trainer 使用或帳號風險保證。請只使用安全存檔編輯功能，並自行評估修改存檔對成就與帳號資料的影響。
 </details>
 
 <details>
 <summary><b>Q3: 為什麼 Trainer 顯示「尚未完成單人關卡實機驗證」或無法點擊附加？</b></summary>
-本專案堅持安全優先原則。在新遊戲版本推出後，對應的 Profile 需先經過嚴格的單人實機唯讀與可逆寫入驗證後才會標記為 `verified: true`。在完成驗證前，系統會以 fail-closed 模式防護以避免遊戲異常。
+這是 v1.0.0 的預期安全行為。所有隨附 Profile 都是 `verified: false`；在完成特定遊戲版本的單人離線實機驗證前，系統會保持 fail-closed 並拒絕附加。
 </details>
 
 <details>

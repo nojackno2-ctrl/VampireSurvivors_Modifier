@@ -7,6 +7,15 @@ obj/
 *.pubxml.user
 TestResults/
 artifacts/
+*.pdb
+*.dbg
+*.dmp
+*.mdmp
+*.gcdump
+*.nettrace
+*.etl
+captures/
+process-captures/
 
 # Game and reverse-engineering files (never publish)
 *.dll
