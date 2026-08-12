@@ -1,0 +1,72 @@
+name: GitHub Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+  DOTNET_NOLOGO: '1'
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Install .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.302
+
+      - name: Guard tag against product version
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/Assert-Version.ps1 -Tag $env:RELEASE_TAG
+
+      - name: Restore win-x64 assets
+        run: dotnet restore VSModifier.slnx --runtime win-x64 --configfile NuGet.Config
+
+      - name: Build Release with analyzers
+        run: dotnet build VSModifier.slnx --configuration Release --no-restore
+
+      - name: Run console test suite
+        run: dotnet run --project VSModifier.Tests --configuration Release --no-build --no-restore
+
+      - name: Build and audit release assets
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: ./scripts/build-release.ps1 -Tag $env:RELEASE_TAG -NoRestore
+
+      - name: Create GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $zip = @(Get-ChildItem -LiteralPath artifacts/release -Recurse -File -Filter '*.zip')
+          $checksums = @(Get-ChildItem -LiteralPath artifacts/release -Recurse -File -Filter 'SHA256SUMS')
+          if ($zip.Count -ne 1 -or $checksums.Count -ne 1) {
+            throw "Expected one ZIP and one SHA256SUMS; found $($zip.Count) ZIP and $($checksums.Count) checksum files."
+          }
+          $assets = @($zip[0].FullName, $checksums[0].FullName)
+
+          & gh release create $env:RELEASE_TAG @assets `
+            --verify-tag `
+            --target $env:RELEASE_SHA `
+            --title "VSModifier $env:RELEASE_TAG" `
+            --notes-file RELEASE_NOTES.md
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release create failed with exit code $LASTEXITCODE."
+          }

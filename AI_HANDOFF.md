@@ -1,5 +1,47 @@
 # AI Handoff
 
+## v1.0.0 CI / release pipeline (2026-08-12, in progress)
+
+- Scope is build/version/package automation only; no game installation or save is being modified, and Trainer profiles remain `verified: false` / fail-closed. No Trainer runtime-availability claim is authorized.
+- Starting tree was clean on `main` at `53e2f08`, matching `origin/main`; recent commits, full collaboration files, and `DESIGN.md` were reviewed before editing.
+- Baseline Release solution build passed with 0 warnings/errors using `--no-restore -warnaserror`; the custom test runner passed 23/23. Restore without `--no-restore` may be blocked by sandbox access to the user NuGet.Config, so local work uses the already restored assets and GitHub Actions will perform clean restore.
+- Active objective: add a reliable CI + GitHub Release workflow, make v1.0.0 the single version source with tag-version guard, publish a self-contained win-x64 ZIP plus SHA-256, and audit every release entry against the proprietary/personal-data blacklist.
+- Implementation milestone: `Directory.Build.props` now owns version `1.0.0` and enables current .NET analyzers plus warnings-as-errors; shared PowerShell scripts implement tag guarding, self-contained win-x64 packaging, Trainer `verified:false` enforcement, executable file-version checks, blacklist audits, ZIP creation, and `SHA256SUMS`. CI and tag-triggered GitHub Release workflows call the same scripts. `README.md` and `RELEASE_NOTES.md` now state that v1.0.0 is a safe save editor and that Trainer support is disabled/unverified. These new changes are not yet build/test/package verified at this milestone.
+- Verification milestone: the modified tree passed `dotnet build VSModifier.slnx --configuration Release --no-restore` with all five projects built, recommended analyzers/warnings-as-errors active, 0 warnings and 0 errors. Test, publish, ZIP audit, version inspection, and hash verification are still pending.
+- Test milestone: the real Release console runner passed all 23/23 named tests via `dotnet run --project VSModifier.Tests --configuration Release --no-build --no-restore`, including safe-save write/backup/process blocking and fail-closed Trainer guard/profile tests. No game process or user save was accessed by this suite. Publish/asset audit remains pending.
+- Failed publish attempt: `scripts/build-release.ps1 -NoRestore` correctly stopped because the existing restore graph lacks the self-contained `win-x64` runtime packs (`NU1100` for `Microsoft.NETCore.App.Runtime.win-x64`, `Microsoft.WindowsDesktop.App.Runtime.win-x64`, and `Microsoft.AspNetCore.App.Runtime.win-x64` version 10.0.10). No ZIP was produced. Next attempt must perform a runtime-specific restore; this is distinct from the successful framework build/test assets.
+- Audit hardening milestone: release inspection now works under the repository's Windows PowerShell 5.1 environment without `Path.GetRelativePath`, verifies entries remain under the audit root, and additionally rejects managed symbols, packet/browser captures, Unity asset/bundle formats, `Assembly-CSharp` assemblies, and common Unity shared/level assets. Packaging now records the exact source HEAD in its output and passes it to the .NET build for provenance. These adjustments are not yet package-verified.
+- Restore attempt evidence: even with explicit `--configfile artifacts/NuGet.Codex.Config --ignore-failed-sources`, the managed sandbox denied NuGet's preliminary reads of `%APPDATA%\NuGet\NuGet.Config`; restore did not reach package resolution. The required 10.0.10 runtime-pack nupkgs are confirmed present and readable in the local global package cache. The next retry will isolate `APPDATA` to a workspace-local temporary directory so NuGet cannot touch the blocked user config.
+- Isolated-APPDATA restore evidence: redirecting `APPDATA` successfully bypassed the blocked user config, but restricted shell networking could not reach `https://api.nuget.org/v3/index.json`; because warnings are errors, the restore ended with `NU1801`/`NU1900` and `NU1101`. This changed only generated `obj` restore state and produced no release asset. Package-cache resolution still needs a local source or explicit cache path before the final publish retry.
+- Runtime restore milestone: copied the already cached official 10.0.10 `Microsoft.NETCore.App.Runtime.win-x64`, `Microsoft.WindowsDesktop.App.Runtime.win-x64`, and `Microsoft.AspNetCore.App.Runtime.win-x64` nupkgs into an ignored workspace-local feed, then restored the App/Core/Memory graph successfully for `win-x64` with isolated `APPDATA` and no network. The feed/config are verification-only ignored artifacts, not release or tracked content. Final publish/audit is ready to retry.
+- Restore evidence: `dotnet restore VSModifier.slnx --runtime win-x64` initially failed before compilation because this sandbox cannot read `C:\Users\nojac\AppData\Roaming\NuGet\NuGet.Config`. The repository-scoped `NuGet.Config` now explicitly defines nuget.org for hosted clean restores, while local sandbox verification used isolated `APPDATA`, the existing package cache, and an ignored offline feed; all 5 runtime-specific restore graphs were subsequently regenerated successfully.
+- Local restore/build evidence: redirecting sandbox `APPDATA` to `artifacts\nuget-appdata`, explicitly reusing the existing read-only global package cache with `NUGET_PACKAGES=C:\Users\nojac\.nuget\packages`, and selecting the repository `NuGet.Config` restored all 5 projects for `win-x64`. The subsequent `dotnet build VSModifier.slnx --configuration Release --no-restore` passed in 2.09 seconds with 0 warnings and 0 errors under enabled latest analyzers and warnings-as-errors.
+- Test evidence: the real Release console runner completed all named tests and reported exactly `23/23 tests passed.` This covers save checksum/write safety, the game-running write refusal, catalog/profile policy, fail-closed online guard, reversible memory primitives, and self-process native memory round-trip only; it is not Trainer gameplay verification.
+- Integrated package retry: after the compatible audit changes, `build-release.ps1 -NoRestore` stopped during publish because the current `project.assets.json` again contained unresolved 10.0.10 runtime-pack/source errors and the managed shell cannot reach `https://api.nuget.org/v3/index.json`; no ZIP was produced. The runtime-pack nupkgs remain available in the read-only global package cache, so the next retry must first regenerate the runtime restore graph with isolated `APPDATA`, explicit `NUGET_PACKAGES`, and an offline source-cleared temporary config.
+- Final local package evidence: after regenerating all 5 `win-x64` restore graphs from the workspace-local runtime-pack feed, `scripts/build-release.ps1 -NoRestore` succeeded. Both staging and extracted-ZIP audits passed with exactly 405 files, executable file version `1.0.0.0`, and 2/2 Trainer profiles `verified:false`. The audited asset is `artifacts\release\1.0.0\VSModifier-v1.0.0-win-x64.zip`; SHA-256 is `99182f59708e330bab09831928ab3660f3927d4f54cd7680c91284a0b7f5b98d`, recorded in UTF-8-no-BOM `SHA256SUMS`. Packaging reported source HEAD `53e2f081681e96487404867c13ad73d752d2a5e3` plus the current uncommitted working-tree changes, as required because commits/tags were forbidden.
+- Final independent checks: `Assert-Version.ps1` accepted `v1.0.0` and rejected `v1.0.1`; the ZIP hash exactly matched `SHA256SUMS`, all seven required executable/document/data entries were present, all PowerShell scripts parsed under Windows PowerShell 5.1, both source profiles remained `false`, and `git diff --check` passed. ZIP size is 63,083,144 bytes. Temporary ignored offline-feed directories remain under `artifacts/` because managed shell policy blocked their cleanup; they are not ZIP entries or tracked release content.
+- Remaining runtime/release limits: no real save, game installation, game process, Trainer attach/write, WPF launch, gameplay behavior, GitHub Actions run, tag, upload, or GitHub Release was performed. Trainer availability/effects remain unverified and disabled/fail-closed. The ZIP is locally verified only and is not a server-side release.
+- Workflow hardening: CI and Release jobs have 20-minute timeouts. The GitHub upload resolves and requires exactly one ZIP plus one `SHA256SUMS` before invoking `gh`, avoiding native Windows wildcard ambiguity, and explicitly checks the CLI exit code. This workflow-only adjustment has local static/diff review but no hosted Actions run.
+- Post-hardening package refresh: reran `scripts/build-release.ps1 -NoRestore` after the workflow edits. Publish plus both 405-file audits passed again, file version remained `1.0.0.0`, profiles remained 2/2 `verified:false`, source HEAD remained `53e2f081681e96487404867c13ad73d752d2a5e3` plus authorized uncommitted changes, and the deterministic ZIP SHA-256 remained `99182f59708e330bab09831928ab3660f3927d4f54cd7680c91284a0b7f5b98d`.
+- Guard/audit confirmation: `Assert-Version.ps1 -Tag v1.0.1` rejected the mismatch and expected `v1.0.0`. A separate ZIP re-audit again found 405 files, 0 forbidden entries, file version `1.0.0.0`, 2/2 profiles false, and recomputed SHA-256 exactly matching `SHA256SUMS`.
+
+## 分支整合與清理維護（2026-08-12）
+
+- 已檢查本地與遠端 Git 儲存庫分支狀態：
+  - PR #1 (`agent/initial-public-release`) 與 PR #2 (`claude/readme-traditional-chinese-fvg4vi`) 均已完整合併至主分支 `main`。
+  - 本地僅保留 `main`，且與 `origin/main` 保持完全同步（HEAD: `f7c6199`）。
+  - 已完成遠端已合併分支 `origin/claude/readme-traditional-chinese-fvg4vi` 的刪除與 `git fetch --all --prune` 修剪。
+  - 目前所有本機及遠端多餘分支已全數清理完畢，乾淨只留 `main` 分支。
+- 驗證狀態：全方案建置維持 0 警告 / 0 錯誤，全套 23/23 測試持續通過。
+
+## 對外公開繁體中文 README 更新（2026-08-10）
+
+- 已全面重寫與完善 `README.md`，採用繁體中文對外公開格式：
+  - 完整涵蓋軌道 A（存檔修改器）與軌道 B（記憶體 Trainer）之功能清單、安全設計與運作原理。
+  - 新增系統需求、詳細操作步驟指引（含 Steam 雲端防衝突流程、單人關卡 Trainer 附加流程）、預設全域熱鍵對照表。
+  - 新增遊戲改版與版本偏移熱重新載入維護說明、從原始碼建置與發布步驟、專案架構概覽、常見問題 (FAQ) 與免責聲明。
+- 驗證狀態：全方案建置維持 0 警告 / 0 錯誤，全套 23/23 測試持續通過。
+
 ## 熱路徑與程式碼結構優化（2026-07-27）
 
 - 線上防護改為鎖服務的共用前置 guard：`ValueLockService` 新增 `guard`／`guardKey`，每個 100ms 週期在所有鎖之前只跑一次 `EnsureOffline`，`Set` 也在寫入前先跑一次。原本每個鎖的委派各自呼叫 `EnsureOffline`，安全檢查成本隨啟用功能數線性成長（23 項功能 = 每秒 230 次指標鏈解析）。
@@ -33,7 +75,7 @@
 4. 所有遊戲安裝檔只可唯讀；不得直接修改安裝目錄。實際存檔寫入只能由修改器安全流程執行，測試不得寫使用者存檔。
 5. 2026-07-23 新三檔 Profile 已完成重新抽取、靜態更新與熱重新載入支援；接著進入任一單人關卡，完成 Trainer 全鏈唯讀與逐項可逆實機驗證。Profile 在此之前必須保持 `verified: false`。
 
-最近重要 Commit：`e3347dc`（Trainer 版本資料熱重新載入）、`40a9949`（2026-07-23 遊戲版本資料）、`74fbdab`（受控 Trainer 實機驗證流程）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；首次公開基線已推送 `main`，目前發布檢查分支為 `agent/initial-public-release`，Draft PR 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier/pull/1`。兩個最新 commit 尚未 push，接手時仍務必以 Git log、status 與 diff 為準。
+最近重要 Commit：`f7c6199`（更新繁體中文 README 與 AI_HANDOFF）、`f664f5d`（Merge PR #2）、`4a3aaed`（Merge PR #1）、`e3347dc`（Trainer 版本資料熱重新載入）、`40a9949`（2026-07-23 遊戲版本資料）、`74fbdab`（受控 Trainer 實機驗證流程）。公開 repository 為 `https://github.com/nojackno2-ctrl/VampireSurvivors_Modifier`；PR #1 與 PR #2 均已併入 `main`，目前僅維護單一 `main` 分支且已與 `origin/main` 保持完全同步。
 
 ## 已確認環境
 
@@ -152,3 +194,11 @@
 - 從本機 Chromium LevelDB 精確讀出 trainer `48760` blueprint：loader 為 `trainerlib`，共有 15 項；現有重疊功能之外，新增目標為 `set_coins`、`set_level`、`set_experience`、`force_item_on_level_up`、`choose_item_to_force`、`force_duplicate_next_weapon`、`force_duplicate_next_accessory`。其中設金幣要求先進一次 Power Ups 頁，兩個 duplicate 是只作用下一次的 button。
 - Electron loader 程式碼證實其新舊後端都採 DLL 注入／remote thread；Trainer 變數名稱會傳入注入後的 DLL。這個載入方法不可搬進本專案，後續只擷取行為與遊戲端 target，再以外部 RPM/WPM/AOB/code patch 乾淨室重作。
 - 本輪開始前重新驗證 Debug 全方案 0 警告／0 錯誤、17/17 測試通過。已安裝 x64dbg 2026.05.27；僅在已忽略的 `artifacts/research/` 建立 CELib 呼叫參數擷取腳本，準備做單機動態觀察。
+
+## 2026-08-12 v1.0.0 public release preparation (uncommitted)
+
+- Added a single version source, CI/release workflows, exact tag-version guard, audited self-contained win-x64 packaging, checksums, release notes, and public documentation. Trainer profiles remain 2/2 `verified:false`; the existing fail-closed attach policy is unchanged.
+- Local verification: Release build 0 warnings/errors, console suite 23/23, release audit 405 files with no forbidden game/save/dump content, and file version `1.0.0.0`.
+- Claude CLI security review found GitHub context values interpolated directly into `run:` PowerShell. The workflow now passes tag/SHA through environment variables, disables checkout credential persistence, and keeps the release job at least privilege (`contents: write` only).
+- The latest pre-commit local ZIP hash was `E6A71CEEC3EF29C61957A08E0C6413A75EA674050767E2EC06969BF553F9BE78`; rebuild and server-side asset rehash are required after the final commit.
+- No game installation, save, Trainer attach/write, or gameplay effect was exercised during this release preparation.

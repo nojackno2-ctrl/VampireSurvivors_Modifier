@@ -1,4 +1,13 @@
 <Project>
+  <PropertyGroup>
+    <!-- The only product-version source. Release scripts and workflows read this value. -->
+    <Version>1.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>None</DebugType>
     <DebugSymbols>false</DebugSymbols>
