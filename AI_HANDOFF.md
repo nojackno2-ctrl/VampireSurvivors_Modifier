@@ -1,6 +1,10 @@
 # AI Handoff
 
-## v1.0.0 CI / release pipeline (2026-08-12, in progress)
+## 2026-08-12 v1.0.0 publication
+
+- Published formal GitHub Release `v1.0.0` from `20f5051cb2ad25a46ca38c0e697d5e4bd6f0e8ee`; hosted CI and Release succeeded. Downloaded ZIP SHA-256 `02B95E08C7CE7F2F515F51DF215BE3BA4BD61F826F5318B544438FEA41D4A321` matched GitHub and checksum. No game installation or save was modified.
+
+## v1.0.0 CI / release pipeline (2026-08-12, completed)
 
 - Scope is build/version/package automation only; no game installation or save is being modified, and Trainer profiles remain `verified: false` / fail-closed. No Trainer runtime-availability claim is authorized.
 - Starting tree was clean on `main` at `53e2f08`, matching `origin/main`; recent commits, full collaboration files, and `DESIGN.md` were reviewed before editing.
