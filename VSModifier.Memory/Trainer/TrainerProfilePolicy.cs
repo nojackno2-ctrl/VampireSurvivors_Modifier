@@ -7,6 +7,7 @@ public static class TrainerProfilePolicy
     public static readonly TimeSpan MinimumVerificationDuration = TimeSpan.FromMilliseconds(100);
     public static readonly TimeSpan MaximumVerificationDuration = TimeSpan.FromSeconds(5);
     public static readonly TimeSpan MaximumHookVerificationDuration = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan MaximumTreasureBehaviorVerificationDuration = TimeSpan.FromSeconds(30);
 
     public static void RequireReleaseReady(GameVersionProfile profile)
     {
@@ -51,6 +52,20 @@ public static class TrainerProfilePolicy
             FeatureKind.Hook,
             duration,
             MaximumHookVerificationDuration);
+    }
+
+    public static FeatureDefinition RequireTreasureBehaviorVerification(
+        GameVersionProfile profile,
+        string expectedProfileId,
+        TimeSpan duration)
+    {
+        return RequireDevelopmentVerificationCore(
+            profile,
+            expectedProfileId,
+            "maxTreasure",
+            FeatureKind.Patch,
+            duration,
+            MaximumTreasureBehaviorVerificationDuration);
     }
 
     private static FeatureDefinition RequireDevelopmentVerificationCore(

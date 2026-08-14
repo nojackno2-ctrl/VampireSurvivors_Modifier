@@ -52,6 +52,11 @@ internal static class Program
             return await RunTrainerPatchVerification(args);
         }
 
+        if (args.Length > 0 && args[0].Equals("--verify-treasure-behavior", StringComparison.OrdinalIgnoreCase))
+        {
+            return await RunTreasureBehaviorVerification(args);
+        }
+
         if (args.Length > 0 && args[0].Equals("--verify-trainer-hook", StringComparison.OrdinalIgnoreCase))
         {
             return await RunTrainerHookVerification(args);
@@ -82,6 +87,7 @@ internal static class Program
             ("offset catalog parsing", TestOffsetCatalog),
             ("offset catalog live reload detection", TestOffsetCatalogLiveReload),
             ("trainer verification policy", TestTrainerVerificationPolicy),
+            ("treasure behavior log evidence", TestTreasureLogEvidence),
             ("trainer same-address restoration and one-shot values", TestTrainerValueSafety),
             ("value lock enforcement", TestValueLockService),
             ("shared safety guard runs once per tick", TestValueLockSharedGuard),
@@ -286,6 +292,50 @@ internal static class Program
         Console.WriteLine($"PASS  profile={result.ProfileId}; feature={result.FeatureKey}; durationMs={result.Duration.TotalMilliseconds:R}");
         Console.WriteLine($"PASS  appliedBytes={result.AppliedBytesMatched}; restoredBytes={result.RestoredBytesMatched}");
         return 0;
+    }
+
+    private static async Task<int> RunTreasureBehaviorVerification(string[] args)
+    {
+        if (args.Length != 3
+            || !int.TryParse(args[2], NumberStyles.None, CultureInfo.InvariantCulture, out int durationMilliseconds))
+        {
+            Console.Error.WriteLine("Usage: --verify-treasure-behavior <profile-id> <duration-ms>");
+            return 2;
+        }
+
+        Console.WriteLine(
+            "DEV ONLY: 先在單人關卡靠近寶箱；本命令最多維持最高寶箱 patch 30 秒，偵測到新的 Player.log 寶箱事件後立即還原。線上 guard 必須持續為 0。");
+        GameInstallation installation = GetCurrentGameInstallation();
+        OffsetCatalog catalog = LoadOffsetCatalog();
+        using CancellationTokenSource cancellation = new();
+        ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            cancellation.Cancel();
+        };
+        Console.CancelKeyPress += cancelHandler;
+        try
+        {
+            TreasureBehaviorVerificationResult result =
+                await TrainerVerificationRunner.VerifyTreasureBehaviorAsync(
+                catalog,
+                installation.GameAssemblyPath,
+                installation.UnityPlayerPath,
+                installation.MetadataPath,
+                args[1],
+                TreasureLogMonitor.GetDefaultPlayerLogPath(),
+                TimeSpan.FromMilliseconds(durationMilliseconds),
+                cancellation.Token);
+            Console.WriteLine(
+                $"PASS  profile={result.ProfileId}; prizeCount={result.PrizeCount}; durationMs={result.Duration.TotalMilliseconds:R}");
+            Console.WriteLine(
+                $"PASS  appliedBytes={result.AppliedBytesMatched}; restoredBytes={result.RestoredBytesMatched}; prizeTypes={string.Join(',', result.PrizeTypes)}");
+            return 0;
+        }
+        finally
+        {
+            Console.CancelKeyPress -= cancelHandler;
+        }
     }
 
     private static async Task<int> RunTrainerHookVerification(string[] args)
@@ -962,6 +1012,57 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static async Task TestTreasureLogEvidence()
+    {
+        True(
+            TreasureLogMonitor.TryParseObservation(
+                "Treasure PrizeCount = 5 PrizeType = Weapon PrizeType = Gold",
+                out TreasureLogObservation parsed),
+            "A valid treasure log line was not recognized.");
+        Equal(5, parsed.PrizeCount, "Parsed treasure prize count differs.");
+        Equal(2, parsed.PrizeTypes.Count, "Parsed treasure prize types differ.");
+        Equal("Weapon", parsed.PrizeTypes[0], "First parsed treasure prize type differs.");
+        True(
+            !TreasureLogMonitor.TryParseObservation("Treasure opened without result", out _),
+            "An unrelated log line must not count as treasure behavior evidence.");
+
+        string directory = Path.Combine(Path.GetTempPath(), $"VSModifierTreasure-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(directory);
+        string logPath = Path.Combine(directory, "Player.log");
+        try
+        {
+            await File.WriteAllTextAsync(logPath, "Treasure PrizeCount = 1\n", Utf8WithoutBom);
+            TreasureLogCheckpoint checkpoint = TreasureLogMonitor.CaptureCheckpoint(logPath);
+            await File.AppendAllTextAsync(logPath, "Treasure PrizeCount = 5 PrizeType = Weapon\n", Utf8WithoutBom);
+            TreasureLogObservation observation = await TreasureLogMonitor.WaitForObservationAsync(
+                logPath,
+                checkpoint,
+                TimeSpan.FromSeconds(1));
+            Equal(5, observation.PrizeCount, "The monitor reused a treasure event from before its checkpoint.");
+
+            await File.WriteAllBytesAsync(logPath, [0xE4]);
+            checkpoint = TreasureLogMonitor.CaptureCheckpoint(logPath);
+            byte[] splitCharacterAndEvidence = [
+                0xB8,
+                0xAD,
+                .. Utf8WithoutBom.GetBytes("Treasure PrizeCount = 5\n")
+            ];
+            await using (FileStream append = new(logPath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+            {
+                await append.WriteAsync(splitCharacterAndEvidence);
+            }
+            observation = await TreasureLogMonitor.WaitForObservationAsync(
+                logPath,
+                checkpoint,
+                TimeSpan.FromSeconds(1));
+            Equal(5, observation.PrizeCount, "A UTF-8 checkpoint boundary hid later treasure evidence.");
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static Task TestTrainerVerificationPolicy()
     {
         AddressDefinition online = new()
@@ -979,6 +1080,17 @@ internal static class Program
                 BaseOffset = 32
             }
         };
+        FeatureDefinition treasurePatch = new()
+        {
+            Kind = FeatureKind.Patch,
+            Address = new AddressDefinition
+            {
+                Module = "GameAssembly.dll",
+                BaseOffset = 48
+            },
+            ExpectedBytes = "90",
+            PatchBytes = "91"
+        };
         GameVersionProfile unverified = new()
         {
             ProfileId = "test-profile",
@@ -989,7 +1101,8 @@ internal static class Program
             OnlineSession = online,
             Features = new Dictionary<string, FeatureDefinition>(StringComparer.Ordinal)
             {
-                ["test.value"] = valueFeature
+                ["test.value"] = valueFeature,
+                ["maxTreasure"] = treasurePatch
             }
         };
 
@@ -1021,6 +1134,17 @@ internal static class Program
             "test.value",
             FeatureKind.Value,
             TimeSpan.FromSeconds(6)));
+        Equal(
+            treasurePatch,
+            TrainerProfilePolicy.RequireTreasureBehaviorVerification(
+                unverified,
+                "test-profile",
+                TimeSpan.FromSeconds(30)),
+            "Treasure behavior verification must select only the maxTreasure patch.");
+        Throws<ArgumentOutOfRangeException>(() => TrainerProfilePolicy.RequireTreasureBehaviorVerification(
+            unverified,
+            "test-profile",
+            TimeSpan.FromSeconds(31)));
 
         GameVersionProfile verified = new()
         {
