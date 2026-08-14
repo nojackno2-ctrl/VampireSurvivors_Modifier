@@ -142,7 +142,7 @@ cd VampireSurvivors_Modifier
 # 編譯整個解決方案
 dotnet build VSModifier.sln --configuration Release
 
-# 執行自動化測試（23 項完整測試）
+# 執行自動化測試（24 項完整測試）
 dotnet run --project VSModifier.Tests --configuration Release
 ```
 

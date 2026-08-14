@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using VSModifier.Memory.Profiles;
 
 namespace VSModifier.Memory.Trainer;
@@ -22,6 +23,14 @@ public sealed record PatchVerificationResult(
     string FeatureKey,
     bool AppliedBytesMatched,
     bool RestoredBytesMatched,
+    TimeSpan Duration);
+
+public sealed record TreasureBehaviorVerificationResult(
+    string ProfileId,
+    bool AppliedBytesMatched,
+    bool RestoredBytesMatched,
+    int PrizeCount,
+    IReadOnlyList<string> PrizeTypes,
     TimeSpan Duration);
 
 public sealed record HookVerificationResult(
@@ -159,6 +168,96 @@ public static class TrainerVerificationRunner
         finally
         {
             TryRestorePatch(session, featureKey);
+        }
+    }
+
+    public static async Task<TreasureBehaviorVerificationResult> VerifyTreasureBehaviorAsync(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        string playerLogPath,
+        TimeSpan duration,
+        CancellationToken cancellationToken = default)
+    {
+        await using TrainerSession session = TrainerSession.AttachForTreasureBehaviorVerification(
+            catalog,
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath,
+            expectedProfileId,
+            duration);
+        TaskCompletionSource<TrainerSafetyStopEventArgs> safetyStop = CreateSafetyStopSignal(session);
+        TreasureLogCheckpoint checkpoint = TreasureLogMonitor.CaptureCheckpoint(playerLogPath);
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        try
+        {
+            if (!session.PatchMatchesForVerification("maxTreasure", expectedPatched: false))
+            {
+                throw new InvalidDataException("套用前的最高寶箱程式碼位元組與 Profile 不符，已拒絕驗證。");
+            }
+
+            session.EnablePatch("maxTreasure");
+            bool applied = session.PatchMatchesForVerification("maxTreasure", expectedPatched: true);
+            if (!applied)
+            {
+                throw new IOException("最高寶箱 patch 寫入後讀回驗證失敗。");
+            }
+
+            using CancellationTokenSource logCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            Task<TreasureLogObservation> observationTask = TreasureLogMonitor.WaitForObservationAsync(
+                playerLogPath,
+                checkpoint,
+                duration,
+                logCancellation.Token);
+            Task completed = await Task.WhenAny(observationTask, safetyStop.Task).ConfigureAwait(false);
+            if (completed == safetyStop.Task)
+            {
+                logCancellation.Cancel();
+                try
+                {
+                    await observationTask.ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (logCancellation.IsCancellationRequested)
+                {
+                    // The safety stop is the primary failure and already initiated restoration.
+                }
+
+                TrainerSafetyStopEventArgs args = await safetyStop.Task.ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"寶箱行為驗證因安全防護停止（{args.Key}）：{args.Cause.Message}",
+                    args.RestorationError is null
+                        ? args.Cause
+                        : new AggregateException(args.Cause, args.RestorationError));
+            }
+
+            TreasureLogObservation observation = await observationTask.ConfigureAwait(false);
+            session.DisablePatch("maxTreasure");
+            bool restored = session.PatchMatchesForVerification("maxTreasure", expectedPatched: false);
+            if (!restored)
+            {
+                throw new IOException("最高寶箱 patch 原始位元組還原後讀回驗證失敗。");
+            }
+
+            if (observation.PrizeCount != 5)
+            {
+                throw new InvalidDataException(
+                    $"Player.log 記錄的寶箱獎勵數為 {observation.PrizeCount}，不是預期的 5；Profile 保持未驗證。");
+            }
+
+            return new TreasureBehaviorVerificationResult(
+                session.Profile.ProfileId,
+                applied,
+                restored,
+                observation.PrizeCount,
+                observation.PrizeTypes,
+                stopwatch.Elapsed);
+        }
+        finally
+        {
+            TryRestorePatch(session, "maxTreasure");
         }
     }
 
