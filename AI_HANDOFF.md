@@ -1,5 +1,10 @@
 # AI Handoff
 
+## 2026-08-25 Workflow release resilience update
+
+- Updated `.github/workflows/release.yml` release step to check if a release already exists before creating.
+- If the release already exists, it gracefully uploads/updates assets using `gh release upload --clobber` instead of failing with an exit code error.
+
 ## 2026-08-13 WPF UI redesign
 
 - UI redesign started from `main` at `887d7ef` with the existing uncommitted treasure-verification work fully preserved. The pre-existing dirty files are `README.md`, `VSModifier.Memory/Trainer/*`, `VSModifier.Tests/Program.cs`, `docs/reverse-engineering.md`, and this handoff; UI work is restricted to `VSModifier.App` plus merge-only handoff updates.
