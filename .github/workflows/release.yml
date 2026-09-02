@@ -48,7 +48,7 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: ./scripts/build-release.ps1 -Tag $env:RELEASE_TAG -NoRestore
 
-      - name: Create GitHub Release
+      - name: Create or update GitHub Release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
@@ -62,11 +62,23 @@ jobs:
           }
           $assets = @($zip[0].FullName, $checksums[0].FullName)
 
-          & gh release create $env:RELEASE_TAG @assets `
-            --verify-tag `
-            --target $env:RELEASE_SHA `
-            --title "VSModifier $env:RELEASE_TAG" `
-            --notes-file RELEASE_NOTES.md
+          $releaseExists = $false
+          try {
+            gh release view "$env:RELEASE_TAG" --repo "$env:GITHUB_REPOSITORY" 2>$null
+            if ($LASTEXITCODE -eq 0) { $releaseExists = $true }
+          } catch {}
+
+          if ($releaseExists) {
+            Write-Host "Release $env:RELEASE_TAG already exists. Uploading/updating assets with --clobber..."
+            & gh release upload $env:RELEASE_TAG @assets --clobber
+          } else {
+            Write-Host "Creating new release $env:RELEASE_TAG..."
+            & gh release create $env:RELEASE_TAG @assets `
+              --verify-tag `
+              --target $env:RELEASE_SHA `
+              --title "VSModifier $env:RELEASE_TAG" `
+              --notes-file RELEASE_NOTES.md
+          }
           if ($LASTEXITCODE -ne 0) {
-            throw "gh release create failed with exit code $LASTEXITCODE."
+            throw "GitHub release step failed with exit code $LASTEXITCODE."
           }

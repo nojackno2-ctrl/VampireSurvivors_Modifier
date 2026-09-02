@@ -22,13 +22,16 @@ public partial class MainWindow : Window
     private static readonly JsonSerializerOptions IndentedJson = new() { WriteIndented = true };
 
     // 狀態列每秒更新一次；筆刷改為凍結後共用，避免每次都解析色碼並配置新的 SolidColorBrush。
-    private static readonly Brush GameRunningLightBrush = CreateFrozenBrush("#EF4444");
-    private static readonly Brush GameStoppedLightBrush = CreateFrozenBrush("#22C55E");
-    private static readonly Brush GameRunningTextBrush = CreateFrozenBrush("#FCA5A5");
-    private static readonly Brush GameStoppedTextBrush = CreateFrozenBrush("#86EFAC");
-    private static readonly Brush ChecksumValidBrush = CreateFrozenBrush("#4ADE80");
-    private static readonly Brush StatusErrorBrush = CreateFrozenBrush("#FCA5A5");
-    private static readonly Brush StatusNormalBrush = CreateFrozenBrush("#CBD5E1");
+    private static readonly Brush GameRunningLightBrush = CreateFrozenBrush("#E27979");
+    private static readonly Brush GameStoppedLightBrush = CreateFrozenBrush("#58C58A");
+    private static readonly Brush GameRunningTextBrush = CreateFrozenBrush("#F09292");
+    private static readonly Brush GameStoppedTextBrush = CreateFrozenBrush("#78D7A1");
+    private static readonly Brush ChecksumValidBrush = CreateFrozenBrush("#78D7A1");
+    private static readonly Brush StatusErrorBrush = CreateFrozenBrush("#F09292");
+    private static readonly Brush StatusCriticalBrush = CreateFrozenBrush("#FF6B6B");
+    private static readonly Brush StatusWarningBrush = CreateFrozenBrush("#E1B356");
+    private static readonly Brush StatusSuccessBrush = CreateFrozenBrush("#78D7A1");
+    private static readonly Brush StatusNormalBrush = CreateFrozenBrush("#C7D0DB");
 
     private readonly GameProcessDetector _processDetector = new();
     private readonly SaveFileService _saveFileService;
@@ -207,7 +210,7 @@ public partial class MainWindow : Window
             ReloadButton.IsEnabled = File.Exists(SavePathTextBox.Text);
             SaveButton.IsEnabled = false;
             ChecksumText.Text = "無法驗證";
-            ChecksumText.Foreground = Brushes.OrangeRed;
+            ChecksumText.Foreground = StatusErrorBrush;
             ShowError("無法載入存檔", exception);
         }
         finally
@@ -740,7 +743,7 @@ public partial class MainWindow : Window
         try
         {
             TrainerStatusText.Text = "正在辨識遊戲版本…";
-            TrainerStatusText.Foreground = Brushes.LightGray;
+            TrainerStatusText.Foreground = StatusNormalBrush;
             _gameInstallation = new GameInstallationLocator().FindInstallations().FirstOrDefault();
             if (_gameInstallation is null)
             {
@@ -762,7 +765,7 @@ public partial class MainWindow : Window
             {
                 TrainerVersionText.Text = $"未知組合（GA {fingerprint.GameAssemblySha256[..12]}… / UP {fingerprint.UnityPlayerSha256[..12]}… / MD {fingerprint.Il2CppMetadataSha256[..12]}…）";
                 TrainerStatusText.Text = $"{match.Error} 已拒絕附加；若剛更新 Profile，可按「重新偵測版本」。";
-                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                TrainerStatusText.Foreground = StatusErrorBrush;
                 return;
             }
 
@@ -770,25 +773,25 @@ public partial class MainWindow : Window
             if (!_gameProfile.Verified)
             {
                 TrainerStatusText.Text = "版本已辨識，但偏移尚未完成單人關卡實機驗證；這不是按鈕故障，驗證完成前會拒絕附加。";
-                TrainerStatusText.Foreground = Brushes.Orange;
+                TrainerStatusText.Foreground = StatusWarningBrush;
                 return;
             }
 
             if (_gameProfile.OnlineSession is null)
             {
                 TrainerStatusText.Text = "缺少線上會話防護偏移；已拒絕附加。";
-                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                TrainerStatusText.Foreground = StatusErrorBrush;
                 return;
             }
 
             TrainerStatusText.Text = "版本與線上防護已驗證；啟動遊戲後可附加。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
             TrainerVersionText.Text = "無法辨識";
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
         finally
         {
@@ -827,12 +830,12 @@ public partial class MainWindow : Window
             TrainerControlsPanel.IsEnabled = true;
             UpdateTrainerFeatureAvailability();
             TrainerStatusText.Text = "已附加；線上 guard 每 100ms 持續監控，異常時會停止全部功能並還原。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
         finally
         {
@@ -862,7 +865,7 @@ public partial class MainWindow : Window
             catch (Exception exception)
             {
                 TrainerStatusText.Text = exception.Message;
-                TrainerStatusText.Foreground = Brushes.OrangeRed;
+                TrainerStatusText.Foreground = StatusErrorBrush;
                 if (showErrors)
                 {
                     MessageBox.Show(this, exception.Message, "Trainer 還原失敗", MessageBoxButton.OK, MessageBoxImage.Error);
@@ -874,7 +877,7 @@ public partial class MainWindow : Window
         }
 
         TrainerStatusText.Text = status;
-        TrainerStatusText.Foreground = Brushes.LightGray;
+        TrainerStatusText.Foreground = StatusNormalBrush;
         UpdateGameStatus();
     }
 
@@ -899,7 +902,7 @@ public partial class MainWindow : Window
             ? $"安全防護已停止 Trainer 並還原全部功能：{args.Cause.Message}"
             : $"安全防護已停止 Trainer，但還原時發生錯誤：{args.RestorationError.Message}";
         await DetachTrainerAsync(status, showErrors: args.RestorationError is not null);
-        TrainerStatusText.Foreground = args.RestorationError is null ? Brushes.OrangeRed : Brushes.Red;
+        TrainerStatusText.Foreground = args.RestorationError is null ? StatusErrorBrush : StatusCriticalBrush;
     }
 
     private async void MainWindow_Closed(object? sender, EventArgs e)
@@ -919,7 +922,7 @@ public partial class MainWindow : Window
         {
             EnableHotkeysCheckBox.IsChecked = false;
             TrainerStatusText.Text = "全域熱鍵服務尚未就緒。";
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
             return;
         }
 
@@ -929,20 +932,20 @@ public partial class MainWindow : Window
             {
                 _hotkeyService.RegisterDefaults();
                 TrainerStatusText.Text = "全域熱鍵已啟用；Ctrl+Shift+F12 可緊急中斷並還原。";
-                TrainerStatusText.Foreground = Brushes.LightGreen;
+                TrainerStatusText.Foreground = StatusSuccessBrush;
             }
             else
             {
                 _hotkeyService.UnregisterAll();
                 TrainerStatusText.Text = "全域熱鍵已停用。";
-                TrainerStatusText.Foreground = Brushes.LightGray;
+                TrainerStatusText.Foreground = StatusNormalBrush;
             }
         }
         catch (Exception exception)
         {
             EnableHotkeysCheckBox.IsChecked = false;
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 
@@ -957,7 +960,7 @@ public partial class MainWindow : Window
         if (_trainerSession is null)
         {
             TrainerStatusText.Text = "熱鍵未執行：Trainer 尚未附加。";
-            TrainerStatusText.Foreground = Brushes.Orange;
+            TrainerStatusText.Foreground = StatusWarningBrush;
             return;
         }
 
@@ -973,7 +976,7 @@ public partial class MainWindow : Window
         if (!toggle.IsEnabled)
         {
             TrainerStatusText.Text = $"熱鍵未執行：此版本不支援 {toggle.Content}。";
-            TrainerStatusText.Foreground = Brushes.Orange;
+            TrainerStatusText.Foreground = StatusWarningBrush;
             return;
         }
 
@@ -1079,12 +1082,12 @@ public partial class MainWindow : Window
             double value = _trainerSession.ReadValue(key);
             GetRuntimeValueTextBox(key).Text = value.ToString("R", CultureInfo.InvariantCulture);
             TrainerStatusText.Text = $"{key} 已讀取：{value.ToString("R", CultureInfo.InvariantCulture)}。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 
@@ -1102,12 +1105,12 @@ public partial class MainWindow : Window
             double actual = _trainerSession.WriteValue(key, requested);
             valueBox.Text = actual.ToString("R", CultureInfo.InvariantCulture);
             TrainerStatusText.Text = $"{key} 已設定並讀回驗證：{actual.ToString("R", CultureInfo.InvariantCulture)}。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 
@@ -1147,7 +1150,7 @@ public partial class MainWindow : Window
         {
             _trainerSession.EnableForcedLevelUpItem(item.Id);
             TrainerStatusText.Text = $"強制升級候選已改為 {item.DisplayName}。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
@@ -1155,7 +1158,7 @@ public partial class MainWindow : Window
             ForceLevelUpItemCheckBox.IsChecked = false;
             _updatingTrainerUi = false;
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 
@@ -1182,12 +1185,12 @@ public partial class MainWindow : Window
             }
 
             TrainerStatusText.Text = $"{((Button)sender).Content}：已準備下一次新增。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 
@@ -1197,7 +1200,7 @@ public partial class MainWindow : Window
         {
             action();
             TrainerStatusText.Text = $"{toggle.Content}：{(toggle.IsChecked == true ? "已啟用" : "已還原")}。";
-            TrainerStatusText.Foreground = Brushes.LightGreen;
+            TrainerStatusText.Foreground = StatusSuccessBrush;
         }
         catch (Exception exception)
         {
@@ -1205,7 +1208,7 @@ public partial class MainWindow : Window
             toggle.IsChecked = false;
             _updatingTrainerUi = false;
             TrainerStatusText.Text = exception.Message;
-            TrainerStatusText.Foreground = Brushes.OrangeRed;
+            TrainerStatusText.Foreground = StatusErrorBrush;
         }
     }
 

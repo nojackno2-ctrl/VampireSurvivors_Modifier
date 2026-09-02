@@ -11,9 +11,10 @@
 - 已用 Il2CppDumper v6.7.46 重新產生本機忽略的 metadata v31 dump。`GM`、`GameManager`、`CharacterController`、`PlayerModifierStats`、`PlayerOptionsData` 與 `TreasureFactory.MakePrizes` 的 TypeDef／欄位偏移維持不變。
 - `GM_TypeInfo` RVA 從舊版 `160283072` 移到 `160283208`；所有以 `GM.Core` 為根的新版 pointer chain 已使用新 RVA，禁止僅替換雜湊而沿用舊根位址。
 - `TreasureFactory.MakePrizes` RVA 仍為 `0x69E5DE0`。依 PE section table 將兩段 runtime RVA 映射回 raw offset 後，新 DLL 的 `0x69E60C8` 仍為 `8B 4B 18`，`0x69E66C0` 仍為 `F3 0F 2C 47 48`；候選 patch 與 expected bytes 因此可保留，但仍須實際開箱驗證。
+- 最終開箱驗證使用專用、開發限定命令，不再要求操作者在原本的五秒裸 patch 視窗內碰到寶箱：先在離線單人關卡靠近一個未開寶箱，再執行 `dotnet run --project VSModifier.Tests --configuration Debug -- --verify-treasure-behavior steam-current-2026-07-23 30000`，然後立即開箱。流程只允許 `maxTreasure`、最多 30 秒，持續執行 100ms 線上 guard，只接受 checkpoint 之後新增的 `Player.log` `Treasure PrizeCount = 5` 事件；成功或任何失敗都會還原兩段 patch 並讀回原始位元組。命令成功只能證明本次 log 行為與還原，仍須搭配使用者目視結果及其餘功能證據，才能考慮將 Profile 改為 `verified: true`。
 - `UnityPlayer.dll` 未變，`gameSpeed` 唯一 AOB 可沿用；仍須在實際程序重新確認唯一命中與時間倍率效果。
 - 重新抽取的解鎖表只有角色 ID `TP_CHAOS` 從 `BoughtCharacters`／`UnlockedCharacters` 移除，其餘 9 組 ID 陣列沒有集合差異。
-- Debug／Release 全方案建置 0 警告／0 錯誤，17/17 測試通過；live read-only 已證明新三檔 Profile 與新解鎖 Profile 同時精確命中。修改器會依 `offsets.json` 內容 SHA-256 自動偵測 Profile 更新，支援手動重新偵測，正式附加前也會重算遊戲三檔指紋；尚未在單人關卡讀寫記憶體。
+- Debug／Release 全方案建置 0 警告／0 錯誤的舊基準與後續測試里程碑均記錄於 `AI_HANDOFF.md`；live read-only 已證明新三檔 Profile 與新解鎖 Profile 同時精確命中。修改器會依 `offsets.json` 內容 SHA-256 自動偵測 Profile 更新，支援手動重新偵測，正式附加前也會重算遊戲三檔指紋。記憶體位元組套用／還原已有受控證據，但實際寶箱行為仍待上述專用流程完成。
 
 ## 先前 Steam 版（2026-07-22 擷取）
 

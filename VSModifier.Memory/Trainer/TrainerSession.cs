@@ -198,6 +198,38 @@ public sealed class TrainerSession : IAsyncDisposable
         }
     }
 
+    internal static TrainerSession AttachForTreasureBehaviorVerification(
+        OffsetCatalog catalog,
+        string gameAssemblyPath,
+        string unityPlayerPath,
+        string metadataPath,
+        string expectedProfileId,
+        TimeSpan duration)
+    {
+        ArgumentNullException.ThrowIfNull(catalog);
+        GameVersionFingerprint fingerprint = GameVersionFingerprint.Calculate(
+            gameAssemblyPath,
+            unityPlayerPath,
+            metadataPath);
+        GameVersionProfile profile = catalog.Match(fingerprint).Profile
+            ?? throw new InvalidOperationException("目前 offsets.json 不支援這個遊戲版本。");
+        TrainerProfilePolicy.RequireTreasureBehaviorVerification(
+            profile,
+            expectedProfileId,
+            duration);
+
+        ProcessMemorySession memory = ProcessMemorySession.Attach();
+        try
+        {
+            return new TrainerSession(memory, profile, "maxTreasure");
+        }
+        catch
+        {
+            memory.Dispose();
+            throw;
+        }
+    }
+
     public void EnableValueLock(string featureKey, double value)
     {
         EnableComputedLock(
