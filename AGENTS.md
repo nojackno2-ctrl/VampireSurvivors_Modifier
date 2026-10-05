@@ -10,3 +10,10 @@
 - 修改前先檢查 Git 狀態與現有差異；不得覆蓋或丟棄不屬於自己的變更。
 - 未經使用者明確授權，不自動 push、rebase、reset 或刪除分支；使用者已授權在重要且已驗證的里程碑建立 commit。
 - 只有實際執行過的建置、測試或行為驗證才能宣稱成功。
+
+## Automatic commits (user authorization, 2026-10-05)
+
+- The user has authorized automatic local commits for all projects. After completing a task and appropriate verification, commit the task changes without asking for confirmation again; do not create empty commits.
+- Review the diff and preserve existing work. Include unrelated pre-existing changes only when the user explicitly requests committing them. Never commit secrets, credentials, or personal runtime data.
+- This standing authorization covers local commits only. Push, release, merge, rebase, reset, force-push, branch deletion, and destructive operations still require explicit authorization.
+- Record what was verified and any unverified behavior in `AI_HANDOFF.md`; never present a commit as proof that functionality works.
