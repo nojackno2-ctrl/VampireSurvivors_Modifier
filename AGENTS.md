@@ -8,5 +8,14 @@
 - 遊戲 DLL、metadata、Il2CppDumper 完整輸出、個人存檔與備份不得加入版本控制。
 - `AI_HANDOFF.md` 是即時共享狀態；每個重要發現、實作里程碑與驗證結果都要立即更新。
 - 修改前先檢查 Git 狀態與現有差異；不得覆蓋或丟棄不屬於自己的變更。
-- 未經使用者明確授權，不自動 push、rebase、reset 或刪除分支；使用者已授權在重要且已驗證的里程碑建立 commit。
+- 未經使用者明確授權，不進行破壞性操作（force-push、rebase、reset 或刪除分支）；使用者已授權在重要且已驗證的里程碑建立 commit 並自動 push 到 GitHub。
 - 只有實際執行過的建置、測試或行為驗證才能宣稱成功。
+
+## Automatic commits and push to GitHub (user authorization, 2026-10-14)
+
+- The user has authorized automatic local commits and automatic push to GitHub for all projects.
+- After completing a task and appropriate verification, commit the task changes and push to GitHub (`origin`) without asking for confirmation again; do not create empty commits.
+- Review the diff and preserve existing work. Include unrelated pre-existing changes only when the user explicitly requests committing them. Never commit secrets, credentials, or personal runtime data.
+- This standing authorization covers local commits and pushing verified work to GitHub. Destructive operations (force-push, release, merge, rebase, reset, branch deletion) still require explicit authorization.
+- A Git `post-commit` hook is configured in `.git/hooks/post-commit` to automatically push the current branch to `origin` upon commit.
+- Record what was verified and any unverified behavior in `AI_HANDOFF.md`; never present a commit as proof that functionality works.
